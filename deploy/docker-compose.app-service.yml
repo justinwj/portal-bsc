@@ -1,0 +1,13 @@
+services:
+  portal-bsc:
+    image: portal-bsc:latest
+    container_name: portal-bsc
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOST: 0.0.0.0
+    ports:
+      - "3000:3000"
