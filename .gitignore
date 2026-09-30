@@ -1,0 +1,62 @@
+# dependencies
+/node_modules
+
+# build outputs
+/dist
+/coverage
+/.nest
+
+# logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# dotenv environment files
+.env
+.env.*
+!.env.example
+
+# local data and uploads
+/data/*.json
+/uploads
+
+# cache and temporary files
+.cache
+.tmp
+.temp
+
+# IDE/editor files
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# package managers
+.pnpm-store
+.npm
+.yarn
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+
+# diagnostics
+*.tsbuildinfo
