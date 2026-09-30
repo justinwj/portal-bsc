@@ -1,0 +1,29 @@
+<section class="page-header">
+  <h1>Authorized files</h1>
+</section>
+<div class="card">
+  <table>
+    <thead>
+      <tr>
+        <th>Title</th>
+        <th>Category</th>
+        <th>Type</th>
+        <th>Visibility</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{#each files}}
+        <tr>
+          <td><a href="/files/{{this._id}}">{{this.title}}</a></td>
+          <td>{{this.category}}</td>
+          <td>{{this.mimeType}}</td>
+          <td>{{this.visibility}}</td>
+          <td><a href="/download/{{this._id}}">Download</a></td>
+        </tr>
+      {{else}}
+        <tr><td colspan="5">No files are currently available for your account.</td></tr>
+      {{/each}}
+    </tbody>
+  </table>
+</div>

@@ -1,0 +1,11 @@
+<section class="card detail-card">
+  <h1>{{file.title}}</h1>
+  <p>{{file.description}}</p>
+  <dl class="metadata-list">
+    <div><dt>Category</dt><dd>{{file.category}}</dd></div>
+    <div><dt>Mime type</dt><dd>{{file.mimeType}}</dd></div>
+    <div><dt>Size</dt><dd>{{file.sizeBytes}} bytes</dd></div>
+    <div><dt>SHA-256</dt><dd>{{file.sha256}}</dd></div>
+  </dl>
+  <a class="button" href="/download/{{file._id}}">Secure download</a>
+</section>

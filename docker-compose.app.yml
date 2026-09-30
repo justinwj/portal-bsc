@@ -1,0 +1,32 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      PORT: 3000
+      NODE_ENV: production
+      SESSION_SECRET: change-me-please
+      REDIS_URL: redis://redis:6379
+      COUCHDB_URL: http://couchdb:5984
+      NAS_FILES_DIR: /var/lib/portal-bsc/files
+      ADMIN_USERNAME: admin
+      ADMIN_EMAIL: admin@example.com
+      ADMIN_PASSWORD: ChangeMe123!
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data/files:/var/lib/portal-bsc/files
+    depends_on:
+      - redis
+      - couchdb
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  couchdb:
+    image: couchdb:3
+    ports:
+      - "5984:5984"

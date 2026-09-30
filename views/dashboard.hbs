@@ -1,0 +1,19 @@
+<section class="page-header">
+  <h1>Welcome, {{user.username}}</h1>
+  <p>Available files for your role: {{user.role}}</p>
+</section>
+<div class="grid two-col">
+  <div class="card">
+    <h2>Recent access</h2>
+    <p>Use the Files page to view authorized documents and download approved content.</p>
+  </div>
+  <div class="card">
+    <h2>Quick links</h2>
+    <ul class="plain-list">
+      <li><a href="/files">Browse files</a></li>
+      {{#if (eq user.role 'admin')}}
+        <li><a href="/admin/users">Manage users</a></li>
+      {{/if}}
+    </ul>
+  </div>
+</div>
