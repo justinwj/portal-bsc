@@ -22,8 +22,6 @@ async function bootstrap(): Promise<void> {
 
   app.use(
     helmet({
-      contentSecurityPolicy: false,
-      crossOriginEmbedderPolicy: false,
       hsts: appConfig.isProduction,
     }),
   );
