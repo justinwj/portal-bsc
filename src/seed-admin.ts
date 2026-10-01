@@ -6,9 +6,9 @@ dotenv.config();
 
 async function seedAdmin() {
   const usersService = new UsersService(new CouchDbService());
-  const username = process.env.ADMIN_USERNAME || 'admin';
-  const email = process.env.ADMIN_EMAIL || 'admin@example.com';
-  const password = process.env.ADMIN_PASSWORD || 'change-me-to-a-strong-password';
+  const username = process.env.ADMIN_USERNAME ?? 'admin';
+  const email = process.env.ADMIN_EMAIL ?? 'admin@example.com';
+  const password = process.env.ADMIN_PASSWORD ?? 'change-me-to-a-strong-password';
 
   if (process.env.NODE_ENV === 'production' && (!process.env.ADMIN_USERNAME || !process.env.ADMIN_EMAIL || !process.env.ADMIN_PASSWORD)) {
     throw new Error('Production admin bootstrap requires ADMIN_USERNAME, ADMIN_EMAIL, and ADMIN_PASSWORD');
@@ -28,6 +28,11 @@ async function seedAdmin() {
 
   if (result.message === 'admin-already-present') {
     console.log(`Admin user already present: ${result.username}`);
+    return;
+  }
+
+  if (result.message === 'admin-existing-non-admin') {
+    console.log(`Existing user '${result.username}' is not an admin and was not modified.`);
     return;
   }
 

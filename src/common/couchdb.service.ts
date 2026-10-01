@@ -220,8 +220,9 @@ export class CouchDbService {
       fileTitle,
       createdAt: new Date().toISOString(),
     };
+    const storedDoc = ip ? { ...doc, ip } : doc;
     if (this.db) {
-      await this.db.use('portal_downloads').insert({ ...doc, ip });
+      await this.db.use('portal_downloads').insert(storedDoc);
       return doc;
     }
     this.inMemory.downloads.set(doc._id, doc);

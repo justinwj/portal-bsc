@@ -47,17 +47,18 @@ class EnvironmentVariables {
 }
 
 export function validateEnv(config: Record<string, any>) {
+  const isProduction = config.NODE_ENV === 'production';
   const merged = {
     ...config,
     NODE_ENV: config.NODE_ENV ?? 'development',
     PORT: config.PORT ?? 3000,
-    SESSION_SECRET: config.SESSION_SECRET ?? (config.NODE_ENV === 'production' ? undefined : 'development-session-secret'),
-    REDIS_URL: config.REDIS_URL ?? (config.NODE_ENV === 'production' ? undefined : 'redis://localhost:6379'),
-    COUCHDB_URL: config.COUCHDB_URL ?? (config.NODE_ENV === 'production' ? undefined : 'http://localhost:5984'),
-    NAS_FILES_DIR: config.NAS_FILES_DIR ?? (config.NODE_ENV === 'production' ? undefined : './data/files'),
-    ADMIN_USERNAME: config.ADMIN_USERNAME ?? (config.NODE_ENV === 'production' ? undefined : 'admin'),
-    ADMIN_EMAIL: config.ADMIN_EMAIL ?? (config.NODE_ENV === 'production' ? undefined : 'admin@example.com'),
-    ADMIN_PASSWORD: config.ADMIN_PASSWORD ?? (config.NODE_ENV === 'production' ? undefined : 'change-me-to-a-strong-password'),
+    SESSION_SECRET: isProduction ? config.SESSION_SECRET : config.SESSION_SECRET ?? 'development-session-secret',
+    REDIS_URL: isProduction ? config.REDIS_URL : config.REDIS_URL ?? 'redis://localhost:6379',
+    COUCHDB_URL: isProduction ? config.COUCHDB_URL : config.COUCHDB_URL ?? 'http://localhost:5984',
+    NAS_FILES_DIR: isProduction ? config.NAS_FILES_DIR : config.NAS_FILES_DIR ?? './data/files',
+    ADMIN_USERNAME: isProduction ? config.ADMIN_USERNAME : config.ADMIN_USERNAME ?? 'admin',
+    ADMIN_EMAIL: isProduction ? config.ADMIN_EMAIL : config.ADMIN_EMAIL ?? 'admin@example.com',
+    ADMIN_PASSWORD: isProduction ? config.ADMIN_PASSWORD : config.ADMIN_PASSWORD ?? 'change-me-to-a-strong-password',
   };
 
   const env = plainToInstance(EnvironmentVariables, merged, { enableImplicitConversion: true });

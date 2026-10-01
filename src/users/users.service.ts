@@ -56,7 +56,8 @@ export class UsersService {
     }
     user.role = UserRole.ADMIN;
     user.updatedAt = new Date().toISOString();
-    return this.couchDbService.saveUser(user);
+    const updated = await this.couchDbService.saveUser(user);
+    return updated;
   }
 
   async assertFirstAdmin(): Promise<UserRecord | null> {
@@ -73,8 +74,9 @@ export class UsersService {
       if (existing.role === UserRole.ADMIN) {
         return { ...existing, message: 'admin-already-present' };
       }
-      await this.promoteToAdmin(existing._id!);
-      return { ...existing, role: UserRole.ADMIN, message: 'admin-promoted' };
+
+      const promoted = await this.promoteToAdmin(existing._id!);
+      return { ...promoted, message: 'admin-promoted' };
     }
 
     const created = await this.createUser({
