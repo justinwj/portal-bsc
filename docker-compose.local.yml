@@ -1,0 +1,26 @@
+version: "3.9"
+
+# Local development services only.
+# Port publishing below is intentionally for local onboarding and should not be reused as production guidance.
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: portal-bsc-redis-local
+    ports:
+      # Local-only host exposure for development convenience.
+      - "6379:6379"
+
+  couchdb:
+    image: couchdb:3
+    container_name: portal-bsc-couchdb-local
+    environment:
+      COUCHDB_USER: admin
+      COUCHDB_PASSWORD: password
+    ports:
+      # Local-only host exposure for development convenience.
+      - "5984:5984"
+    volumes:
+      - couchdb-local-data:/opt/couchdb/data
+
+volumes:
+  couchdb-local-data:
