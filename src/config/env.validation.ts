@@ -1,5 +1,5 @@
 import { plainToInstance } from 'class-transformer';
-import { IsEnum, IsInt, IsNotEmpty, IsString, Max, Min, validateSync } from 'class-validator';
+import { IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Max, Min, validateSync } from 'class-validator';
 
 class EnvironmentVariables {
   @IsEnum(['development', 'test', 'production'])
@@ -10,33 +10,40 @@ class EnvironmentVariables {
   @Max(65535)
   PORT: number = 3000;
 
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
-  SESSION_SECRET: string = 'dev-session-secret';
+  SESSION_SECRET?: string;
 
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
-  REDIS_URL: string = 'redis://localhost:6379';
+  REDIS_URL?: string;
 
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
-  COUCHDB_URL: string = 'http://localhost:5984';
+  COUCHDB_URL?: string;
 
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
-  NAS_FILES_DIR: string = './data/files';
+  NAS_FILES_DIR?: string;
 
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
-  ADMIN_USERNAME: string = 'admin';
+  ADMIN_USERNAME?: string;
 
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
-  ADMIN_EMAIL: string = 'admin@example.com';
+  ADMIN_EMAIL?: string;
 
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
-  ADMIN_PASSWORD: string = 'ChangeMe123!';
+  ADMIN_PASSWORD?: string;
 }
 
 export function validateEnv(config: Record<string, any>) {
@@ -44,13 +51,13 @@ export function validateEnv(config: Record<string, any>) {
     ...config,
     NODE_ENV: config.NODE_ENV ?? 'development',
     PORT: config.PORT ?? 3000,
-    SESSION_SECRET: config.SESSION_SECRET ?? (config.NODE_ENV === 'production' ? undefined : 'dev-session-secret'),
+    SESSION_SECRET: config.SESSION_SECRET ?? (config.NODE_ENV === 'production' ? undefined : 'development-session-secret'),
     REDIS_URL: config.REDIS_URL ?? (config.NODE_ENV === 'production' ? undefined : 'redis://localhost:6379'),
     COUCHDB_URL: config.COUCHDB_URL ?? (config.NODE_ENV === 'production' ? undefined : 'http://localhost:5984'),
     NAS_FILES_DIR: config.NAS_FILES_DIR ?? (config.NODE_ENV === 'production' ? undefined : './data/files'),
     ADMIN_USERNAME: config.ADMIN_USERNAME ?? (config.NODE_ENV === 'production' ? undefined : 'admin'),
     ADMIN_EMAIL: config.ADMIN_EMAIL ?? (config.NODE_ENV === 'production' ? undefined : 'admin@example.com'),
-    ADMIN_PASSWORD: config.ADMIN_PASSWORD ?? (config.NODE_ENV === 'production' ? undefined : 'ChangeMe123!'),
+    ADMIN_PASSWORD: config.ADMIN_PASSWORD ?? (config.NODE_ENV === 'production' ? undefined : 'change-me-to-a-strong-password'),
   };
 
   const env = plainToInstance(EnvironmentVariables, merged, { enableImplicitConversion: true });

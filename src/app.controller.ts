@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Req, Res, UseGuards, ForbiddenException } from '@nestjs/common';
+import { Controller, Get, Param, Req, Res, UseGuards, NotFoundException } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { AuthGuard } from './common/guards/auth.guard';
 import { FilesService } from './files/files.service';
@@ -28,7 +28,7 @@ export class AppController {
   async fileDetail(@Req() req: Request & { session?: any }, @Param('id') id: string, @Res() res: Response) {
     const file = await this.filesService.getById(id);
     if (!file) {
-      throw new ForbiddenException('File not found');
+      throw new NotFoundException('File not found');
     }
     const visible = await this.filesService.getFileForDownload(id, req.session.user);
     return res.render('file-detail', { title: file.title, file: visible, user: req.session.user, csrfToken: req.csrfToken() });

@@ -14,7 +14,7 @@ export class AuditService {
   }
 
   async logDownload(userId: string, fileId: string, fileTitle: string, ip?: string) {
-    await this.couchDbService.logDownload(userId, fileId, fileTitle);
+    await this.couchDbService.logDownload(userId, fileId, fileTitle, ip);
     return this.couchDbService.logAudit('file.download', { fileId, fileTitle }, userId, undefined, ip);
   }
 }

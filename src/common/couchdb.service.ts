@@ -211,7 +211,7 @@ export class CouchDbService {
     return doc;
   }
 
-  async logDownload(userId: string, fileId: string, fileTitle: string): Promise<DownloadRecord> {
+  async logDownload(userId: string, fileId: string, fileTitle: string, ip?: string): Promise<DownloadRecord> {
     const doc: DownloadRecord = {
       _id: randomUUID(),
       type: 'download',
@@ -221,7 +221,7 @@ export class CouchDbService {
       createdAt: new Date().toISOString(),
     };
     if (this.db) {
-      await this.db.use('portal_downloads').insert(doc);
+      await this.db.use('portal_downloads').insert({ ...doc, ip });
       return doc;
     }
     this.inMemory.downloads.set(doc._id, doc);

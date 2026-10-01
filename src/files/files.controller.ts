@@ -19,7 +19,9 @@ export class FilesController {
     await this.auditService.logDownload(req.session.user.id, allowedFile._id, allowedFile.title, req.ip);
 
     res.setHeader('Content-Type', allowedFile.mimeType || 'application/octet-stream');
-    res.setHeader('Content-Length', String(fileStream.size));
+    if (Number.isFinite(fileStream.size) && fileStream.size >= 0) {
+      res.setHeader('Content-Length', String(fileStream.size));
+    }
     res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(allowedFile.originalFilename || allowedFile.title)}"`);
     return fileStream.stream.pipe(res);
   }

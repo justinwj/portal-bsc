@@ -34,7 +34,6 @@
     "helmet": "^8.0.0",
     "ioredis": "^5.4.1",
     "nano": "^10.0.0",
-    "redis": "^5.12.1",
     "reflect-metadata": "^0.2.1",
     "rxjs": "^7.6.0",
     "uuid": "^14.0.2"
