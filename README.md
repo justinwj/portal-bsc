@@ -28,8 +28,9 @@ Required variables are documented in that file and include:
 Development-only placeholders are clearly marked in `.env.example` and must be replaced for any non-local environment.
 
 ### Local service exposure note
-`docker-compose.local.yml` intentionally publishes Redis, CouchDB, and app-adjacent ports for local development convenience only.
-Do not treat these published ports as production-safe defaults.
+`docker-compose.local.yml` intentionally publishes Redis and CouchDB for local development convenience only.
+If you choose to publish an app port locally (for example `3000:3000`), treat that as local-only as well.
+Do not treat published ports as production-safe defaults.
 
 ### Troubleshooting
 - **App fails at startup with missing env errors**  

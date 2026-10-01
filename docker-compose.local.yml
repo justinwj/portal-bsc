@@ -14,8 +14,9 @@ services:
     image: couchdb:3
     container_name: portal-bsc-couchdb-local
     environment:
-      COUCHDB_USER: admin
-      COUCHDB_PASSWORD: password
+      # Uses values from local .env created from .env.example.
+      COUCHDB_USER: ${COUCHDB_USER}
+      COUCHDB_PASSWORD: ${COUCHDB_PASSWORD}
     ports:
       # Local-only host exposure for development convenience.
       - "5984:5984"
