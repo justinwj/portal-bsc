@@ -3,30 +3,36 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    env_file:
+      - .env
     environment:
-      PORT: 3000
       NODE_ENV: production
-      SESSION_SECRET: change-me-please
+      PORT: 3000
       REDIS_URL: redis://redis:6379
       COUCHDB_URL: http://couchdb:5984
       NAS_FILES_DIR: /var/lib/portal-bsc/files
-      ADMIN_USERNAME: admin
-      ADMIN_EMAIL: admin@example.com
-      ADMIN_PASSWORD: ChangeMe123!
-    ports:
-      - "3000:3000"
     volumes:
       - ./data/files:/var/lib/portal-bsc/files
     depends_on:
       - redis
       - couchdb
+    networks:
+      - portal-net
+    # For local testing only, uncomment the line below and run behind a reverse proxy in production.
+    # ports:
+    #   - "127.0.0.1:3000:3000"
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    command: ["redis-server", "--appendonly", "no"]
+    networks:
+      - portal-net
 
   couchdb:
     image: couchdb:3
-    ports:
-      - "5984:5984"
+    networks:
+      - portal-net
+
+networks:
+  portal-net:
+    driver: bridge

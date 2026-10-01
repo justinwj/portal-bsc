@@ -1,6 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
-import { randomUUID } from 'crypto';
 import { CreateUserDto } from '../common/dto/common.dto';
 import { CouchDbService, UserRecord } from '../common/couchdb.service';
 import { UserRole } from '../common/roles';
@@ -50,6 +49,16 @@ export class UsersService {
     return this.couchDbService.saveUser(user);
   }
 
+  async promoteToAdmin(userId: string) {
+    const user = await this.couchDbService.findUserById(userId);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    user.role = UserRole.ADMIN;
+    user.updatedAt = new Date().toISOString();
+    return this.couchDbService.saveUser(user);
+  }
+
   async assertFirstAdmin(): Promise<UserRecord | null> {
     const users = await this.listUsers();
     if (users.length === 0) {
@@ -61,14 +70,19 @@ export class UsersService {
   async seedAdmin(username: string, email: string, password: string) {
     const existing = await this.couchDbService.findUserByUsername(username);
     if (existing) {
-      return existing;
+      if (existing.role === UserRole.ADMIN) {
+        return { ...existing, message: 'admin-already-present' };
+      }
+      await this.promoteToAdmin(existing._id!);
+      return { ...existing, role: UserRole.ADMIN, message: 'admin-promoted' };
     }
 
-    return this.createUser({
+    const created = await this.createUser({
       username,
       email,
       password,
       role: UserRole.ADMIN,
     });
+    return { ...created, message: 'admin-created' };
   }
 }

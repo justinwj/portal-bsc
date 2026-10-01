@@ -3,5 +3,13 @@ npm-debug.log*
 dist
 .env
 .env.*
-.DS_Store
+.env.local
+*.log
+logs/
+.vscode/
+.idea/
 coverage
+tmp/
+data/
+uploads/
+.DS_Store

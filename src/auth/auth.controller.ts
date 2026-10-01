@@ -1,6 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Post, Req, Res, UseGuards } from '@nestjs/common';
-import { plainToInstance } from 'class-transformer';
-import { validate } from 'class-validator';
+import { Body, Controller, Get, Post, Req, Res, UseGuards } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { AuditService } from '../audit/audit.service';
 import { LoginDto } from '../common/dto/common.dto';
@@ -19,33 +17,51 @@ export class AuthController {
     return res.render('login', {
       title: 'Login',
       error: req.query.error ?? null,
-      csrfToken: req.csrfToken ? req.csrfToken() : '',
+      csrfToken: req.csrfToken(),
     });
   }
 
   @Post('login')
-  async login(@Req() req: Request & { session?: any }, @Body() body: any, @Res() res: Response) {
-    const dto = plainToInstance(LoginDto, body);
-    const errors = await validate(dto);
-    if (errors.length > 0) {
-      await this.auditService.logLoginFailure(body.username || 'unknown', req.ip, 'validation');
-      return res.redirect('/login?error=invalid');
-    }
-
+  async login(@Req() req: Request & { session?: any }, @Body() dto: LoginDto, @Res() res: Response) {
     const user = await this.authService.validateUser(dto);
     if (!user) {
       await this.auditService.logLoginFailure(dto.username, req.ip, 'credentials');
       return res.redirect('/login?error=invalid');
     }
 
+    await new Promise<void>((resolve, reject) => {
+      req.session.regenerate((error: Error | null) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+
     req.session.user = await this.authService.buildSessionUser(user);
+    await new Promise<void>((resolve, reject) => {
+      req.session.save((error?: Error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+
     await this.auditService.logLoginSuccess(user._id, user.username, req.ip);
     return res.redirect('/');
   }
 
   @Get('logout')
   async logout(@Req() req: Request & { session?: any }, @Res() res: Response) {
-    req.session.destroy(() => undefined);
-    return res.redirect('/login');
+    req.session.destroy((error: Error | null) => {
+      res.clearCookie('connect.sid');
+      if (error) {
+        return res.redirect('/login?error=logout');
+      }
+      return res.redirect('/login');
+    });
   }
 }

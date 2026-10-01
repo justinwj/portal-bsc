@@ -1,19 +1,18 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { randomUUID } from 'crypto';
 import { createReadStream, existsSync, promises as fs } from 'fs';
-import { join, resolve, basename } from 'path';
+import { basename, resolve } from 'path';
 import { CouchDbService, FileRecord } from '../common/couchdb.service';
-import { UserRole } from '../common/roles';
+import { SessionUser, UserRole } from '../common/roles';
 
 @Injectable()
 export class FilesService {
   constructor(private readonly couchDbService: CouchDbService) {}
 
-  async listFilesForUser(userRole: UserRole, username?: string) {
+  async listFilesForUser(user: SessionUser) {
     const files = await this.couchDbService.listFiles();
     return files.filter((file) => {
       const allowed = file.allowedRoles && file.allowedRoles.length > 0 ? file.allowedRoles : [UserRole.ADMIN, UserRole.MEMBER];
-      return allowed.includes(userRole) || file.visibility === 'public';
+      return file.visibility === 'public' || allowed.includes(user.role);
     });
   }
 
@@ -43,13 +42,13 @@ export class FilesService {
     return this.couchDbService.createFile(record);
   }
 
-  async getFileForDownload(fileId: string, userRole: UserRole) {
+  async getFileForDownload(fileId: string, user: SessionUser) {
     const file = await this.couchDbService.findFileById(fileId);
     if (!file) {
       throw new NotFoundException('File not found');
     }
     const allowedRoles = file.allowedRoles && file.allowedRoles.length > 0 ? file.allowedRoles : [UserRole.MEMBER, UserRole.ADMIN];
-    if (file.visibility === 'public' || allowedRoles.includes(userRole)) {
+    if (file.visibility === 'public' || allowedRoles.includes(user.role)) {
       return file;
     }
     throw new NotFoundException('File not available to your role');
@@ -70,6 +69,7 @@ export class FilesService {
     if (!existsSync(target)) {
       throw new NotFoundException('Stored file not found on the NAS');
     }
-    return createReadStream(target);
+    const stat = await fs.stat(target);
+    return { stream: createReadStream(target), size: stat.size };
   }
 }

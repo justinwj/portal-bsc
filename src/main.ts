@@ -15,8 +15,10 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const port = Number(process.env.PORT ?? 3000);
+  const isProduction = process.env.NODE_ENV === 'production';
 
-  app.enableCors();
+  app.set('trust proxy', 1);
+  app.disable('x-powered-by');
   app.use(helmet.default());
   app.use(
     rateLimit.default({
@@ -28,38 +30,42 @@ async function bootstrap() {
   );
 
   const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
-  const { RedisStore } = require('connect-redis');
-  const redisClient = new Redis(redisUrl);
-  let sessionStore: any = undefined;
-
-  redisClient.on('error', () => {
-    sessionStore = undefined;
+  const redisClient = new Redis(redisUrl, {
+    lazyConnect: true,
+    maxRetriesPerRequest: 3,
   });
 
-  if (redisClient.status === 'ready') {
-    sessionStore = new RedisStore({ client: redisClient, logErrors: true });
+  if (isProduction) {
+    try {
+      await redisClient.connect();
+    } catch (error) {
+      throw new Error(`Redis session store failed to initialize: ${(error as Error).message}`);
+    }
   }
+
+  const { RedisStore } = require('connect-redis');
+  const sessionStore = isProduction
+    ? new RedisStore({ client: redisClient, logErrors: true })
+    : process.env.ALLOW_IN_MEMORY_SESSION_STORE === 'true'
+      ? new session.MemoryStore()
+      : new RedisStore({ client: redisClient, logErrors: true });
 
   app.use(
     session.default({
-      secret: process.env.SESSION_SECRET || 'local-dev-secret',
+      secret: process.env.SESSION_SECRET || 'dev-session-secret',
       resave: false,
       saveUninitialized: false,
       store: sessionStore,
       cookie: {
         httpOnly: true,
         sameSite: 'lax',
-        secure: process.env.NODE_ENV === 'production',
+        secure: isProduction,
         maxAge: 60 * 60 * 1000,
       },
     }),
   );
 
   app.use(csurf.default({ cookie: false }));
-  app.use((req: any, _res: any, next: any) => {
-    req.csrfToken = req.csrfToken || (() => '');
-    next();
-  });
 
   app.useStaticAssets(join(process.cwd(), 'public'));
   app.setBaseViewsDir(join(process.cwd(), 'views'));
