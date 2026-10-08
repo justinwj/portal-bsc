@@ -53,3 +53,14 @@ test('user service seed admin should promote existing non-admin', async () => {
   const res = await svc.seedAdmin('q', 'x', 'secret');
   assert.equal(res.message, 'admin-promoted');
 });
+
+test('csrf middleware rejects requests without a token', async () => {
+  const next = (err?: unknown) => err;
+  const req: any = { method: 'POST', session: { csrfToken: 'expected' }, body: {} };
+  const res: any = {};
+  const result = await new Promise((resolve) => {
+    const middleware = require('./common/csrf').csrfMiddleware;
+    middleware(req, res, (err?: unknown) => resolve(err));
+  });
+  assert.ok(result instanceof Error);
+});

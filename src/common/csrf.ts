@@ -26,7 +26,12 @@ export function csrfMiddleware(req: Request & { session?: any }, _res: Response,
   }
 
   const expected = req.session.csrfToken;
-  const actual = typeof req.body?._csrf === 'string' ? req.body._csrf : typeof req.headers['x-csrf-token'] === 'string' ? req.headers['x-csrf-token'] : '';
+  const headers = req.headers ?? {};
+  const actual = typeof req.body?._csrf === 'string'
+    ? req.body._csrf
+    : typeof headers['x-csrf-token'] === 'string'
+      ? headers['x-csrf-token']
+      : '';
 
   if (!expected || actual !== expected) {
     return next(new ForbiddenException('Invalid or missing CSRF token'));

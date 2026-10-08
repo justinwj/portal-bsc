@@ -54,7 +54,7 @@ export class AuthController {
     return res.redirect('/');
   }
 
-  @Get('logout')
+  @Post('logout')
   async logout(@Req() req: Request & { session?: any }, @Res() res: Response) {
     req.session.destroy((error: Error | null) => {
       res.clearCookie('connect.sid');

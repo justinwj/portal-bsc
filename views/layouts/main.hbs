@@ -17,7 +17,10 @@
             {{#if (eq user.role 'admin')}}
               <a href="/admin/users">Users</a>
             {{/if}}
-            <a href="/logout">Logout</a>
+            <form method="POST" action="/logout" style="display:inline;">
+              <input type="hidden" name="_csrf" value="{{csrfToken}}" />
+              <button type="submit" class="link-button">Logout</button>
+            </form>
           {{else}}
             <a href="/login">Login</a>
           {{/if}}
