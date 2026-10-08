@@ -1,0 +1,44 @@
+<section class="page-header">
+  <h1>User management</h1>
+</section>
+<div class="grid two-col">
+  <div class="card">
+    <h2>Create user</h2>
+    <form method="POST" action="/admin/users">
+      <input type="hidden" name="_csrf" value="{{csrfToken}}" />
+      <label>Username<input name="username" required /></label>
+      <label>Email<input name="email" type="email" required /></label>
+      <label>Password<input name="password" type="password" required /></label>
+      <label>Role
+        <select name="role">
+          <option value="member">member</option>
+          <option value="admin">admin</option>
+        </select>
+      </label>
+      <button type="submit">Create user</button>
+    </form>
+  </div>
+  <div class="card">
+    <h2>Current users</h2>
+    <table>
+      <thead><tr><th>User</th><th>Role</th><th>Status</th><th>Action</th></tr></thead>
+      <tbody>
+        {{#each users}}
+        <tr>
+          <td>{{this.username}}</td>
+          <td>{{this.role}}</td>
+          <td>{{#if this.isActive}}Active{{else}}Disabled{{/if}}</td>
+          <td>
+            {{#if this.isActive}}
+              <form method="POST" action="/admin/users/{{this._id}}/disable">
+                <input type="hidden" name="_csrf" value="{{../csrfToken}}" />
+                <button type="submit">Disable</button>
+              </form>
+            {{/if}}
+          </td>
+        </tr>
+        {{/each}}
+      </tbody>
+    </table>
+  </div>
+</div>
