@@ -11,7 +11,7 @@ export class FilesService {
   async listFilesForUser(user: SessionUser) {
     const files = await this.couchDbService.listFiles();
     return files.filter((file) => {
-      const allowed = file.allowedRoles && file.allowedRoles.length > 0 ? file.allowedRoles : [UserRole.ADMIN, UserRole.MEMBER];
+      const allowed = Array.isArray(file.allowedRoles) && file.allowedRoles.length > 0 ? file.allowedRoles : [];
       return file.visibility === 'public' || allowed.includes(user.role);
     });
   }
@@ -47,11 +47,17 @@ export class FilesService {
     if (!file) {
       throw new NotFoundException('File not found');
     }
-    const allowedRoles = file.allowedRoles && file.allowedRoles.length > 0 ? file.allowedRoles : [UserRole.MEMBER, UserRole.ADMIN];
-    if (file.visibility === 'public' || allowedRoles.includes(user.role)) {
+
+    if (file.visibility === 'public') {
       return file;
     }
-    throw new NotFoundException('File not available to your role');
+
+    const allowedRoles = Array.isArray(file.allowedRoles) ? file.allowedRoles : [];
+    if (allowedRoles.length === 0 || !allowedRoles.includes(user.role)) {
+      throw new NotFoundException('File not available to your role');
+    }
+
+    return file;
   }
 
   getSecureFilePath(file: FileRecord) {

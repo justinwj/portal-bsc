@@ -46,7 +46,8 @@ export class UsersService {
     }
     user.isActive = isActive;
     user.updatedAt = new Date().toISOString();
-    return this.couchDbService.saveUser(user);
+    const updated = await this.couchDbService.saveUser(user);
+    return updated;
   }
 
   async promoteToAdmin(userId: string) {

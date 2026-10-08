@@ -9,7 +9,8 @@
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "seed:admin": "ts-node src/seed-admin.ts",
-    "test": "echo 'No automated tests configured in this R1 scaffold' && exit 0"
+    "seed:admin:prod": "node dist/seed-admin.js",
+    "test": "node --test --require ts-node/register src/**/*.test.ts"
   },
   "repository": {
     "type": "git",
@@ -24,16 +25,15 @@
     "bcrypt": "^6.0.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
-    "connect-redis": "^10.0.0",
-    "csurf": "^1.9.0",
+    "connect-redis": "^7.0.0",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "express-handlebars": "^9.0.1",
     "express-rate-limit": "^8.7.0",
     "express-session": "^1.17.3",
     "helmet": "^8.0.0",
-    "ioredis": "^5.4.1",
     "nano": "^10.0.0",
+    "redis": "^5.0.0",
     "reflect-metadata": "^0.2.1",
     "rxjs": "^7.6.0",
     "uuid": "^14.0.2"

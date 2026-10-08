@@ -4,13 +4,14 @@ import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import * as session from 'express-session';
 import * as helmet from 'helmet';
-import * as csrf from 'csurf';
 import * as rateLimit from 'express-rate-limit';
 import { engine } from 'express-handlebars';
 import { existsSync, mkdirSync } from 'fs';
 import { join, resolve } from 'path';
-import Redis from 'ioredis';
+import { createClient } from 'redis';
 import { AppModule } from './app.module';
+import { attachCsrfToken, csrfMiddleware } from './common/csrf';
+import { CouchDbService } from './common/couchdb.service';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -38,13 +39,13 @@ async function bootstrap() {
     }),
   );
 
-  const redisClient = new Redis(redisUrl as string, {
-    lazyConnect: true,
-    maxRetriesPerRequest: 3,
-    connectTimeout: 5000,
+  const redisClient = createClient({ url: redisUrl, socket: { connectTimeout: 5000 } });
+  redisClient.on('error', (error) => {
+    console.error('Redis client error:', error);
   });
 
-  if (isProduction || process.env.ALLOW_IN_MEMORY_SESSION_STORE !== 'true') {
+  const allowMemoryFallback = !isProduction && process.env.ALLOW_IN_MEMORY_SESSION_STORE === 'true';
+  if (!allowMemoryFallback) {
     try {
       await redisClient.connect();
     } catch (error) {
@@ -52,13 +53,12 @@ async function bootstrap() {
     }
   }
 
-  const { RedisStore } = require('connect-redis');
-  const allowMemoryFallback = !isProduction && process.env.ALLOW_IN_MEMORY_SESSION_STORE === 'true';
+  const RedisStore = require('connect-redis').default;
   const sessionStore = allowMemoryFallback ? new session.MemoryStore() : new RedisStore({ client: redisClient, logErrors: true });
 
   app.use(
     session.default({
-      secret: sessionSecret,
+      secret: sessionSecret || 'portal-bsc-session-secret',
       resave: false,
       saveUninitialized: false,
       store: sessionStore,
@@ -68,16 +68,17 @@ async function bootstrap() {
         secure: isProduction,
         maxAge: 60 * 60 * 1000,
       },
+      proxy: true,
     }),
   );
 
   app.use(require('express').urlencoded({ extended: false }));
-  app.use(csrf.default({ cookie: false }));
+  app.use((req: any, res: any, next: any) => attachCsrfToken(req, res, next));
   app.use((req: any, res: any, next: any) => {
-    if (req.body && typeof req.body === 'object' && '_csrf' in req.body) {
-      delete req.body._csrf;
+    if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH' || req.method === 'DELETE') {
+      return csrfMiddleware(req, res, next);
     }
-    next();
+    return next();
   });
 
   app.useStaticAssets(join(process.cwd(), 'public'));
@@ -97,6 +98,9 @@ async function bootstrap() {
       forbidNonWhitelisted: true,
     }),
   );
+
+  const couchDbService = app.get(CouchDbService);
+  await couchDbService.initialize();
 
   const rootDir = process.env.NAS_FILES_DIR ?? resolve(process.cwd(), 'data/files');
   if (!existsSync(rootDir)) {

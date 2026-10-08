@@ -64,15 +64,39 @@ export class CouchDbService {
     downloads: new Map<string, DownloadRecord>(),
   };
   private db?: any;
+  private initialized = false;
 
   constructor() {
     const couchDbUrl = process.env.COUCHDB_URL || 'http://localhost:5984';
     try {
       const client = nano(couchDbUrl);
       this.db = client.db;
-      void this.ensureDatabases();
     } catch (error) {
-      this.logger.warn('CouchDB unavailable, using in-memory fallback store');
+      this.logger.warn('CouchDB unavailable, using in-memory fallback store only for local development');
+    }
+  }
+
+  async initialize() {
+    if (this.initialized) {
+      return;
+    }
+    this.initialized = true;
+
+    if (!this.db) {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error('CouchDB is required in production mode');
+      }
+      return;
+    }
+
+    try {
+      await this.ensureDatabases();
+    } catch (error: any) {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error(`CouchDB readiness check failed: ${error?.message ?? String(error)}`);
+      }
+      this.logger.warn(`CouchDB unavailable in local mode: ${error?.message ?? String(error)}`);
+      this.db = undefined;
     }
   }
 
@@ -85,6 +109,8 @@ export class CouchDbService {
       } catch (error: any) {
         if (error.statusCode === 404) {
           await this.db.create(name);
+        } else {
+          throw error;
         }
       }
     }
@@ -133,7 +159,8 @@ export class CouchDbService {
   async findUserById(id: string): Promise<UserRecord | null> {
     if (this.db) {
       try {
-        return await this.db.use('portal_users').get(id);
+        const user = await this.db.use('portal_users').get(id);
+        return user || null;
       } catch {
         return null;
       }
@@ -145,8 +172,9 @@ export class CouchDbService {
     if (this.db) {
       const db = this.db.use('portal_users');
       const next = { ...user, updatedAt: new Date().toISOString() };
-      await db.insert(next);
-      return next;
+      const current = await db.get(user._id);
+      await db.insert({ ...current, ...next, _rev: current._rev });
+      return { ...next, _rev: current._rev } as UserRecord;
     }
     this.inMemory.users.set(user._id, { ...user, updatedAt: new Date().toISOString() });
     return this.inMemory.users.get(user._id)!;
