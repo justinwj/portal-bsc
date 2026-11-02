@@ -39,7 +39,8 @@ async function bootstrap() {
     }),
   );
 
-  const redisClient = createClient({ url: redisUrl, socket: { connectTimeout: 5000 } });
+  const redisConnectTimeout = 5000;
+  const redisClient = createClient({ url: redisUrl, socket: { connectTimeout: redisConnectTimeout } });
   redisClient.on('error', (error) => {
     console.error('Redis client error:', error);
   });
@@ -52,7 +53,10 @@ async function bootstrap() {
       await Promise.race([
         redisClient.connect(),
         new Promise<never>((_resolve, reject) => {
-          connectionDeadline = setTimeout(() => reject(new Error('Redis connection timed out after 5000ms')), 5000);
+          connectionDeadline = setTimeout(
+            () => reject(new Error(`Redis connection timed out after ${redisConnectTimeout}ms`)),
+            redisConnectTimeout,
+          );
         }),
       ]);
     } catch (error) {

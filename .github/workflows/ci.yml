@@ -17,7 +17,7 @@ permissions:
 jobs:
   test:
     name: Node 22 tests and dependency integration
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     services:
       redis:
@@ -42,11 +42,20 @@ jobs:
           --health-timeout 3s
           --health-retries 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '22'
           cache: npm
+      - name: Initialize disposable CouchDB single-node service
+        run: >-
+          curl --fail --silent --show-error
+          --user 'ci-admin:ci-only-password-not-for-production'
+          --header 'Content-Type: application/json'
+          --data '{"action":"enable_single_node"}'
+          http://127.0.0.1:5984/_cluster_setup
       - run: npm ci
       - name: Unit and HTTP tests (must execute tests)
         run: npm test
@@ -60,8 +69,10 @@ jobs:
 
   docker:
     name: Production Docker build (no publish)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
       - run: docker build --pull --target runtime --tag portal-bsc:ci .
