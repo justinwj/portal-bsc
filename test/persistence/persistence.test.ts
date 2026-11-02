@@ -49,6 +49,10 @@ describe('production Compose storage and application container', { concurrency: 
   after(async () => {
     try {
       if (attemptedStack) {
+        try {
+          const logs = await compose(['logs', '--no-color', '--tail', '60']);
+          console.log(logs.stdout);
+        } catch (error) { console.error('Could not collect disposable container diagnostics:', error); }
         await compose(['down', '--timeout', '10']); // Deliberately never --volumes / -v.
         if (volumeName) {
           const result = await exec('docker', ['volume', 'inspect', volumeName]);

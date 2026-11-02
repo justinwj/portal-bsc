@@ -41,6 +41,8 @@ services:
 
   couchdb:
     image: couchdb:3
+    # The image's native user avoids root ownership changes on the read-only config mount.
+    user: '5984:5984'
     environment:
       COUCHDB_USER: ${COUCHDB_USER:?Set COUCHDB_USER}
       COUCHDB_PASSWORD: ${COUCHDB_PASSWORD:?Set COUCHDB_PASSWORD}
