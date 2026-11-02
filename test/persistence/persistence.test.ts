@@ -216,6 +216,17 @@ describe('production Compose storage and application container', { concurrency: 
     console.log('Verified production rendering runtime:', JSON.stringify(runtime));
   });
 
+  it('ships runtime entrypoints, maps and assets without compiled application tests', async () => {
+    await ensureStack();
+    const result = await compose(['exec', '-T', 'app', 'node', '-e',
+      "const fs=require('node:fs');const path=require('node:path');const walk=d=>fs.readdirSync(d,{withFileTypes:true}).flatMap(e=>e.isDirectory()?walk(path.join(d,e.name)):[path.join(d,e.name)]);console.log(JSON.stringify({tests:walk('/app/dist').filter(p=>/\\.(test|spec)\\.(js|d\\.ts|js\\.map)$/.test(p)),entrypoints:['main.js','seed-admin.js','main.js.map','seed-admin.js.map'].every(p=>fs.statSync('/app/dist/'+p).isFile()),assets:fs.statSync('/app/views/layouts/main.hbs').isFile()&&fs.statSync('/app/public/css/styles.css').isFile()}));"]);
+    const artifacts = JSON.parse(result.stdout.trim());
+    console.log('Verified production image artifacts:', JSON.stringify(artifacts));
+    assert.equal(artifacts.entrypoints, true);
+    assert.equal(artifacts.assets, true);
+    assert.deepEqual(artifacts.tests, [], 'Production images must exclude compiled application tests');
+  });
+
   it('reads the existing NAS bind and rejects writes inside the actual production container', async () => {
     await ensureStack();
     const result = await compose(['exec', '-T', 'app', 'node', '-e',
