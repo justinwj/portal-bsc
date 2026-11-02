@@ -58,6 +58,7 @@ jobs:
           http://127.0.0.1:5984/_cluster_setup
       - run: npm ci
         id: install
+      - run: npm run typecheck
       - name: Unit and HTTP tests (must execute tests)
         run: npm test
       - run: npm run build
@@ -74,6 +75,29 @@ jobs:
       - name: Production security audit (block high and critical; report all findings)
         if: ${{ !cancelled() && steps.install.conclusion == 'success' }}
         run: npm audit --omit=dev --audit-level=high
+      - name: Full dependency audit and peer validation
+        run: |
+          npm audit --json
+          npm ls --all
+
+  windows-tooling:
+    name: Node 22 Windows build, watch, and debugger lifecycle
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run test:tooling
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm audit --json
+      - run: npm ls --all
 
   docker:
     name: Production image, Compose persistence, and startup smoke test

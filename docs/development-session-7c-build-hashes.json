@@ -331,5 +331,325 @@
       "file": "users/users.service.js.map",
       "sha256": "b2d84c45e761c2f07a972b319ca0d8f0a15602a4279b9faad563bea3c8c69ceb"
     }
-  ]
+  ],
+  "after": {
+    "outputPath": "C:\\Users\\justu\\RiderProjects\\portal-bsc\\tmp\\session-7c\\baseline\\after",
+    "identicalSurvivingFiles": 69,
+    "removedTestArtifacts": [
+      {
+        "file": "app.test.d.ts",
+        "sha256": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881"
+      },
+      {
+        "file": "app.test.js",
+        "sha256": "38da934ebdc8df801b6c8df8a28dc4ca603bbc3ff4de6c8677e937717c464aab"
+      },
+      {
+        "file": "app.test.js.map",
+        "sha256": "939dae6c15b132d1fcd221455c3aedbc2976d54112346eac514abc44e8c95a42"
+      },
+      {
+        "file": "csrf.http.test.d.ts",
+        "sha256": "396a3607ca8288c7dd02dff9b04e6ffb057b3c6f3d12965421373c3da78b65cc"
+      },
+      {
+        "file": "csrf.http.test.js",
+        "sha256": "c02d0da6a7a089f93245cd5d222dce7a28eeb3272ab294143286df2b116aca2d"
+      },
+      {
+        "file": "csrf.http.test.js.map",
+        "sha256": "f912964b704f501db2874d7e6961a226ebfc1ba7c6345eb49fa440b02fe1530a"
+      },
+      {
+        "file": "files/filesystem.test.d.ts",
+        "sha256": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881"
+      },
+      {
+        "file": "files/filesystem.test.js",
+        "sha256": "7d61e253c7d00b4ecf69da5df8aab8cc5dc3faea18e5f0f054d07bba24d0262f"
+      },
+      {
+        "file": "files/filesystem.test.js.map",
+        "sha256": "acded7113887328cfa72933f65230906d0f8793bf92b68bd9d7d1e5a5c1fcf51"
+      }
+    ],
+    "hashes": [
+      {
+        "file": "app.controller.d.ts",
+        "sha256": "e5a0cfa7a0d4d18c41e62a1a311707dd61ae84f1564ae8cef220f4f1d4811368"
+      },
+      {
+        "file": "app.controller.js",
+        "sha256": "2b6cb5a65992461603477783ede06777484abc7fe67a95f4d79e907c50dfd03a"
+      },
+      {
+        "file": "app.controller.js.map",
+        "sha256": "0d5febf78683cf0cc1204c1563e0b213cfe433476c635e6e6ad2c7ecaebdac2f"
+      },
+      {
+        "file": "app.module.d.ts",
+        "sha256": "9e55d69c2879e4c1f6039d177c0daf79a72435ac51ec7d4f46fc72e8b0c503d6"
+      },
+      {
+        "file": "app.module.js",
+        "sha256": "92a756c8701deaeceba82a357d19747cf67811a7dea4e460b5f2538f82d9af01"
+      },
+      {
+        "file": "app.module.js.map",
+        "sha256": "20f06c2469a022eb73694eadaabff2eeb548104104e4259f44789b2f9823611a"
+      },
+      {
+        "file": "audit/audit.service.d.ts",
+        "sha256": "a93486f010a9e7d12c1de46f5727287f53b9d5d2859e5eaccc9954f467997d88"
+      },
+      {
+        "file": "audit/audit.service.js",
+        "sha256": "b1a13056736f55f9d935226384f6466a1e1962511f799eeeda0665ee2e06539b"
+      },
+      {
+        "file": "audit/audit.service.js.map",
+        "sha256": "fa4814b846e92e6e080fecaf71737c1282e640a40973c394f3c34ab6c6d2818e"
+      },
+      {
+        "file": "auth/auth.controller.d.ts",
+        "sha256": "7643055189f3f72f996d2fb7645c34b9da370fda8e29b9a26675278f48c6230c"
+      },
+      {
+        "file": "auth/auth.controller.js",
+        "sha256": "941528655be992fecd956345c207b6b40dfab02b6e25321a061f497455bf0cdc"
+      },
+      {
+        "file": "auth/auth.controller.js.map",
+        "sha256": "5bdf0f4c99f7308cba121a82bb89d1a4790253816091a0acd77327bd5a481841"
+      },
+      {
+        "file": "auth/auth.service.d.ts",
+        "sha256": "f9e5a96ea68c5ab0c82c1ecef8f78fb33af70cd6591d3cb7e0ea6a71313eb221"
+      },
+      {
+        "file": "auth/auth.service.js",
+        "sha256": "2146931dcbf39abd63c30e7ed8de0bd945c5665c78227261117590526296799f"
+      },
+      {
+        "file": "auth/auth.service.js.map",
+        "sha256": "23e4934d1de4efcb1726812ad662a68362f0dd17e98f76f7c4e8b90b95937b63"
+      },
+      {
+        "file": "common/couchdb.service.d.ts",
+        "sha256": "1e52b02a74ffab2579faec2880495986578fb1a55c5c3dc9e995182989f03b99"
+      },
+      {
+        "file": "common/couchdb.service.js",
+        "sha256": "5dfa1572eb4d29f542b7ae2b470816e480ca7777253be74eaf36e9f27e144dea"
+      },
+      {
+        "file": "common/couchdb.service.js.map",
+        "sha256": "0800dd54c7d99a0fa15cd3b226c953d49a214a7f5a74db5202f4b629496193d4"
+      },
+      {
+        "file": "common/csrf.d.ts",
+        "sha256": "56d8879229efe09f227f23c9519b46df85528ab9d4af45c4db1a38e3c4f4fba0"
+      },
+      {
+        "file": "common/csrf.js",
+        "sha256": "8407654cd87e8f6f38b273d3e190e94cc79047f0e69543c1023cf0c92559ded0"
+      },
+      {
+        "file": "common/csrf.js.map",
+        "sha256": "15f5514054dafd979869463962693316615361f2cc7e6fa02098e4382a86431c"
+      },
+      {
+        "file": "common/dto/common.dto.d.ts",
+        "sha256": "afe16e98b33de737fb9fc11e332e449dad99afece84f500bc3e1f40952a18be5"
+      },
+      {
+        "file": "common/dto/common.dto.js",
+        "sha256": "6b4c6d259ffc3135c453f4000bb5568d30f891fe4251419029c9f2870ab7e88d"
+      },
+      {
+        "file": "common/dto/common.dto.js.map",
+        "sha256": "be286648808666e756b361de4f3f9a0f16c6b28d2799d3ebcb02a817d3d151bd"
+      },
+      {
+        "file": "common/guards/auth.guard.d.ts",
+        "sha256": "21790ddd099020e9affb3ea191619f8eaf3c4d4a24dcd815509d458bba21979d"
+      },
+      {
+        "file": "common/guards/auth.guard.js",
+        "sha256": "6591d993cc6f10c5f0ab0fcc64c0014cb15445caa73e3b31e708f7aab7907e71"
+      },
+      {
+        "file": "common/guards/auth.guard.js.map",
+        "sha256": "544f30f888c10ec706dc7545e88e13a1ed85a4027daa13f616862b096b2e47ba"
+      },
+      {
+        "file": "common/guards/roles.guard.d.ts",
+        "sha256": "42231781f9dc76702c6ed2286994abb31f9c2c4da4ff50d4e6a27079ffc97c5a"
+      },
+      {
+        "file": "common/guards/roles.guard.js",
+        "sha256": "05891a650c58d87797a2a79f8e7af989c3c3646c5cb4452c6f1a738f320718ce"
+      },
+      {
+        "file": "common/guards/roles.guard.js.map",
+        "sha256": "0b909a34ceb72b3e42bf296015f013383f8a92249004749adaf075ef53d5f33e"
+      },
+      {
+        "file": "common/roles.d.ts",
+        "sha256": "3bae82665246d6b0539eb673bfbf1752378eacc58ea6512da038f2ab66ede3ea"
+      },
+      {
+        "file": "common/roles.js",
+        "sha256": "787472f2131fdf5d5b7028b0a5e99b45ee6762caac95b2cbd572cc7621d83457"
+      },
+      {
+        "file": "common/roles.js.map",
+        "sha256": "b77dbb6383f3e5230cdb2fa779b8716a8bd023f71a9fd678a03238a706a47b59"
+      },
+      {
+        "file": "common/views.d.ts",
+        "sha256": "090631f8c1b9aa23bb96c825ae3b89edbeb65a6081158683c1530b8b6f01ba9e"
+      },
+      {
+        "file": "common/views.js",
+        "sha256": "167b8c8f787132759c505b7c857fc2fa1f06e3b67db5879068e6a25be00c68ff"
+      },
+      {
+        "file": "common/views.js.map",
+        "sha256": "94d2b82ad1b51479bce04b5983b7531c7855ebca847d82c023f56c46bf8ca67e"
+      },
+      {
+        "file": "config/configuration.d.ts",
+        "sha256": "0eecb0d0e9f2b4d65529b7ec063460e43f46aa3eb43f0fbed1e6cba94da341cf"
+      },
+      {
+        "file": "config/configuration.js",
+        "sha256": "8654a510d274f58d739ea5753776aec4018f804842021706f302699fb3e27edb"
+      },
+      {
+        "file": "config/configuration.js.map",
+        "sha256": "852df96ae3f38f503e2cfee369931104a67b42be64054a4134b6b1856564ed81"
+      },
+      {
+        "file": "config/configuration.module.d.ts",
+        "sha256": "c48d3c8e74439f840510a6a91fe5687a6e4caa7ce814de9892ecb78e592144d1"
+      },
+      {
+        "file": "config/configuration.module.js",
+        "sha256": "3a8f9872b4c96bd4b46fccea8e4c8e53b717c62e8ab68c1d1efd0973148201b8"
+      },
+      {
+        "file": "config/configuration.module.js.map",
+        "sha256": "41e2018a9f016e4cdde266f45f68b3e626fd29953618437f228c73b36e51821b"
+      },
+      {
+        "file": "config/couchdb.configuration.d.ts",
+        "sha256": "3f9e96c2c0b21f5f5056c83b9d17ade55a8eace830fcc2f3c9e579b4cad4a9b5"
+      },
+      {
+        "file": "config/couchdb.configuration.js",
+        "sha256": "80370ffcf69d24d01b9f073a799c9cc0ff82fd3d4fe5da8b99bf6e480d740c9b"
+      },
+      {
+        "file": "config/couchdb.configuration.js.map",
+        "sha256": "92a07b6820f8d9ac8b42db7432811e96ae0b0f5dfd7c9498a9ad16e702b0c0c5"
+      },
+      {
+        "file": "config/env.validation.d.ts",
+        "sha256": "03d0755d601eab1e438c46ef0158d62dfc033551cd9ffecd4f489b849b13665d"
+      },
+      {
+        "file": "config/env.validation.js",
+        "sha256": "103fca619ef4c6cc2522521990608cbc2682d9b765ff25da1208da1170bfc123"
+      },
+      {
+        "file": "config/env.validation.js.map",
+        "sha256": "78bf912003a04d45b5a1755cbc9d3ed98589d6f5cd1b9a1c80071eb9d8c75262"
+      },
+      {
+        "file": "files/files.controller.d.ts",
+        "sha256": "f3b4aeddb9d762954fbfdfbfe49436702b4e3d3c0a3599d582ddc6e38aae8f27"
+      },
+      {
+        "file": "files/files.controller.js",
+        "sha256": "37ee11c6aaca0c3fcbfe09c240874e92b88387cbd8b27a0b3e7347bc07d698cb"
+      },
+      {
+        "file": "files/files.controller.js.map",
+        "sha256": "b34021ce43e15a49263bde3c275c0eb01f6b27052a8a54384309abfd1dc18772"
+      },
+      {
+        "file": "files/files.service.d.ts",
+        "sha256": "aa2edde7f313e0c9962c8c2cff80855153b127235e554639021b930d2887fc53"
+      },
+      {
+        "file": "files/files.service.js",
+        "sha256": "26f22526189609673f8b2e770be666993bf2e971953c42aeff7515be5ac5d48e"
+      },
+      {
+        "file": "files/files.service.js.map",
+        "sha256": "9e494d954483714b66284e5173c9702ee6ce0deb4453884fc83a6ec703f8e668"
+      },
+      {
+        "file": "health/health.controller.d.ts",
+        "sha256": "e975e1812559ca41186026543e28133a6f40d176eb33993b3825bcc1b376a84f"
+      },
+      {
+        "file": "health/health.controller.js",
+        "sha256": "11f86a72a7c77b94c7797271745c4b6f9ad4d679d46faad4106d53eeda6079d6"
+      },
+      {
+        "file": "health/health.controller.js.map",
+        "sha256": "f7a63a3de1058487b1617d97dbd23ee86e6f000c86331514c4d56b31bb2b20d4"
+      },
+      {
+        "file": "main.d.ts",
+        "sha256": "396a3607ca8288c7dd02dff9b04e6ffb057b3c6f3d12965421373c3da78b65cc"
+      },
+      {
+        "file": "main.js",
+        "sha256": "d03638618aab06da81e5faabbb9bc25fa8d1bfdcc8640b07b4b6cb4f9a5109e2"
+      },
+      {
+        "file": "main.js.map",
+        "sha256": "62a77af69235c8b44cb5a70da1438734491ea5a5ee4de02a3e5522890b6f8f20"
+      },
+      {
+        "file": "seed-admin.d.ts",
+        "sha256": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881"
+      },
+      {
+        "file": "seed-admin.js",
+        "sha256": "1707f46f7f42fc1e8fdcff793862cac3e8c9ef9c3bca4d988c867624dfb3cffc"
+      },
+      {
+        "file": "seed-admin.js.map",
+        "sha256": "f4e7d270c8673b4cc018a40612a64737d66da8e4f625e62f007988939b0d246e"
+      },
+      {
+        "file": "users/users.controller.d.ts",
+        "sha256": "405f07825b7dea110f7daa9c7a03063becbb063dcf1cf7aaa3471990b23e55ce"
+      },
+      {
+        "file": "users/users.controller.js",
+        "sha256": "26c74501cc5a99c2125e3552ebc9d4ca60f05846d01acc91f6c2b0e10c2cd873"
+      },
+      {
+        "file": "users/users.controller.js.map",
+        "sha256": "2b8478a3f17f4dfce5711b26257641ea4e59273eec9e403e7861833c82663b41"
+      },
+      {
+        "file": "users/users.service.d.ts",
+        "sha256": "cc7a63549af874fd7ee603ccfdcd8cee54f4cbdc4b5927ef796b13b3c10b30f2"
+      },
+      {
+        "file": "users/users.service.js",
+        "sha256": "635b3f9d9666463b0d233eae4d346fa4cf2117f263d59199fbe54f638ca99b10"
+      },
+      {
+        "file": "users/users.service.js.map",
+        "sha256": "b2d84c45e761c2f07a972b319ca0d8f0a15602a4279b9faad563bea3c8c69ceb"
+      }
+    ]
+  }
 }

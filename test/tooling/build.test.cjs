@@ -2,19 +2,25 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const {spawnSync} = require('node:child_process');
-const {before, describe, it} = require('node:test');
+const {after, before, describe, it} = require('node:test');
 const {ROOT, project} = require('./support.cjs');
 const TSC = require.resolve('typescript/bin/tsc');
 function files(dir) { const f=require('node:fs'); return f.readdirSync(dir,{withFileTypes:true}).flatMap(e=>e.isDirectory()?files(path.join(dir,e.name)):[path.join(dir,e.name)]); }
 describe('production TypeScript build contract', {concurrency:false}, () => {
-  let output;
+  let output, directory;
   before(async () => {
-    output = path.join(ROOT,'tmp/tooling-build-contract');
-    const config=path.join(ROOT,'tmp/tooling-build-contract.json');
-    await fs.mkdir(path.dirname(config),{recursive:true});
+    await fs.mkdir(path.join(ROOT,'tmp'),{recursive:true});
+    directory = await fs.mkdtemp(path.join(ROOT,'tmp/tooling-build-'));
+    output = path.join(directory,'output');
+    const config=path.join(directory,'tsconfig.json');
     await fs.writeFile(config,JSON.stringify({extends:path.join(ROOT,'tsconfig.build.json'),compilerOptions:{outDir:output,incremental:false}}));
     const result=spawnSync(process.execPath,[TSC,'-p',config],{encoding:'utf8',cwd:ROOT});
     assert.equal(result.status,0,result.stdout+result.stderr);
+  });
+  after(async () => {
+    assert.equal(path.dirname(directory),path.join(ROOT,'tmp'));
+    assert.ok(path.basename(directory).startsWith('tooling-build-'));
+    await fs.rm(directory,{recursive:true,force:true});
   });
   it('emits main and administrator bootstrap entrypoints with source maps', async () => {
     for (const entry of ['main','seed-admin']) {
@@ -48,5 +54,15 @@ describe('production TypeScript build contract', {concurrency:false}, () => {
     assert.equal(result.status,0,result.stdout+result.stderr);
     assert.ok(require('node:fs').existsSync(path.join(ROOT,'dist/main.js')));
     assert.deepEqual(files(path.join(ROOT,'dist')).filter(p=>/\.(test|spec)\.(js|d\.ts|js\.map)$/.test(p)),[]);
+  });
+  it('checks integration test source without emitting it as production JavaScript', async t => {
+    const fixture=await project(t);
+    await fs.mkdir(path.join(fixture.directory,'test/integration'),{recursive:true});
+    await fs.writeFile(path.join(fixture.directory,'test/integration/broken.ts'),'const testValue: string = 123;');
+    const config=path.join(fixture.directory,'check.json');
+    await fs.writeFile(config,JSON.stringify({extends:path.join(ROOT,'tsconfig.check.json'),compilerOptions:{types:[]},include:['src/**/*.ts','test/**/*.ts']}));
+    const result=spawnSync(process.execPath,[TSC,'-p',config],{encoding:'utf8'});
+    assert.notEqual(result.status,0);assert.match(result.stdout,/TS2322/);
+    assert.equal(require('node:fs').existsSync(path.join(fixture.directory,'test/integration/broken.js')),false);
   });
 });

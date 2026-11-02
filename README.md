@@ -35,15 +35,21 @@ Release-1 internal file portal scaffold for a Synology NAS deployment. This is i
 - Public registration is intentionally disabled.
 
 ## Local development
+Use Node.js 22.23.4 or newer within the Node 22 major and npm 10.9.9. No global Nest CLI is required.
+
 1. Copy `.env.example` to `.env` and adjust values.
 2. Ensure Redis and CouchDB are running.
 3. Install dependencies:
-   `npm install --legacy-peer-deps`
+   `npm ci`
 4. Start the app:
    `npm run start:dev`
 5. Seed the first admin user:
    `npm run seed:admin`
 6. Open `http://localhost:3000/login`.
+
+`npm run build` creates a clean production build using TypeScript. `npm run typecheck` checks application and test TypeScript without emitting files. `npm test` includes the HTTP and build/watch/debug contracts; `npm run test:tooling` runs the tooling contracts alone.
+
+The development runner launches only complete, error-free builds, stops on compilation errors, and recovers on correction. Debug with `npm run start:debug` (loopback port 9229), or `npm run start:debug -- --inspect=9230`. See the [development lifecycle and Rider acceptance checklist](docs/development-workflow.md).
 
 ## Production deployment notes
 - Expect Redis and CouchDB to be internal services, not published publicly.

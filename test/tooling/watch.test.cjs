@@ -64,6 +64,8 @@ describe('compilation-aware development lifecycle', {concurrency:false,timeout:1
     await runner.stop();
     await until(()=>{assert.equal(alive(ready.pid),false);assert.equal(alive(tree.pid),false);},'Owned processes remained alive');
     await assertPortFree(appPort);await assertPortFree(treePort);
+    const started=runner.records.find(e=>e.event==='started');
+    await assert.rejects(fs.stat(path.dirname(path.dirname(started.entry))),{code:'ENOENT'});
   });
   it('forced watcher termination also cleans up the owned application tree',async t=>{
     const fixture=await project(t), appPort=await port(), treePort=await port();
@@ -72,6 +74,9 @@ describe('compilation-aware development lifecycle', {concurrency:false,timeout:1
     runner.child.kill('SIGKILL');await runner.exited;
     await until(()=>{assert.equal(alive(ready.pid),false);assert.equal(alive(tree.pid),false);},'Parent-death cleanup failed');
     await assertPortFree(appPort);await assertPortFree(treePort);
+    // Hard-killing every process cannot guarantee filesystem cleanup handlers.
+    // Normal shutdown asserts snapshot removal; force-kill asserts process and
+    // port cleanup even when handlers cannot run.
   });
   it('repeated start/stop cycles leave the application port reusable',async t=>{
     const fixture=await project(t), appPort=await port();
@@ -88,13 +93,44 @@ describe('compilation-aware development lifecycle', {concurrency:false,timeout:1
     await fs.writeFile(fixture.main,MAIN);await runner.wait(e=>e.event==='ready');
     assert.equal((await response(appPort)).value,'one');
   });
+  it('does not restart after a compiler-checking change produces identical output',async t=>{
+    const fixture=await project(t), runner=start(t,fixture,{port:await port()});
+    await runner.wait(e=>e.event==='ready');
+    const generation=runner.records.find(e=>e.event==='compiled').generation;
+    const configPath=path.join(fixture.directory,'tsconfig.json');
+    const config=JSON.parse(await fs.readFile(configPath,'utf8'));
+    config.compilerOptions.noUnusedLocals=true;
+    await fs.writeFile(configPath,JSON.stringify(config));
+    const compiled=await runner.wait(e=>e.event==='compiled'&&e.generation>generation);
+    await runner.wait(e=>e.event==='idle'&&e.generation>=compiled.generation);
+    await runner.stop();assert.equal(runner.records.filter(e=>e.event==='started').length,1);
+  });
+  it('removes deleted source artifacts through a fresh complete snapshot',async t=>{
+    const fixture=await project(t), runner=start(t,fixture,{port:await port()});
+    await fs.writeFile(path.join(fixture.directory,'src/obsolete.ts'),'export const obsolete = true;');
+    await runner.wait(e=>e.event==='ready');
+    const first=runner.records.find(e=>e.event==='started');
+    assert.ok((await fs.stat(path.join(path.dirname(first.entry),'obsolete.js'))).isFile());
+    await fs.unlink(path.join(fixture.directory,'src/obsolete.ts'));
+    const second=await runner.wait(e=>e.event==='started'&&e.pid!==first.pid);
+    await runner.wait(e=>e.event==='ready'&&e.pid===second.pid);
+    await assert.rejects(fs.stat(path.join(path.dirname(second.entry),'obsolete.js')),{code:'ENOENT'});
+    assert.equal(alive(first.pid),false);
+  });
+  it('interrupting the watcher releases the application process and port',async t=>{
+    const fixture=await project(t), appPort=await port(), runner=start(t,fixture,{port:appPort});
+    const ready=await runner.wait(e=>e.event==='ready');
+    runner.child.kill('SIGINT');await runner.exited;
+    await until(()=>assert.equal(alive(ready.pid),false),'Interrupted application remained alive');
+    await assertPortFree(appPort);
+  });
 });
 
 async function inspector(value){return until(async()=>{
   const response=await fetch(`http://127.0.0.1:${value}/json/list`,{signal:AbortSignal.timeout(2000)});
   const list=await response.json();assert.equal(list.length,1);return list[0];
 },'Inspector did not become ready');}
-async function inspect(target){
+async function inspect(target,keepOpen=false){
   assert.equal(new URL(target.webSocketDebuggerUrl).hostname,'127.0.0.1');
   const ws=new WebSocket(target.webSocketDebuggerUrl), scripts=[],pending=new Map();let id=0;
   await new Promise((resolve,reject)=>{ws.addEventListener('open',resolve,{once:true});ws.addEventListener('error',reject,{once:true});});
@@ -105,7 +141,8 @@ async function inspect(target){
     const stack=await command('Runtime.evaluate',{expression:'globalThis.probeStack()',returnByValue:true});
     assert.match(stack.result.value,/src[\\/]main\.ts/);
     assert.ok(scripts.some(s=>s.url.endsWith('/main.js')&&s.sourceMapURL==='main.js.map'));
-  }finally{ws.close();await new Promise(resolve=>ws.addEventListener('close',resolve,{once:true}));}
+    if(keepOpen)return ws;
+  }finally{if(!keepOpen){ws.close();await new Promise(resolve=>ws.addEventListener('close',resolve,{once:true}));}}
 }
 describe('loopback debugging and source maps',{concurrency:false,timeout:90000},()=>{
   it('attaches to the predictable loopback inspector with TypeScript maps across restarts',async t=>{
@@ -114,9 +151,11 @@ describe('loopback debugging and source maps',{concurrency:false,timeout:90000},
     const ready=await runner.wait(e=>e.event==='ready');
     assert.ok(ready.execArgv.includes('--enable-source-maps'));
     assert.ok(ready.execArgv.includes(`--inspect=127.0.0.1:${debugPort}`));
-    const first=await inspector(debugPort);await inspect(first);
+    const first=await inspector(debugPort);const connection=await inspect(first,true);
+    const disconnected=new Promise(resolve=>connection.addEventListener('close',resolve,{once:true}));
     await fs.writeFile(fixture.value,"export const value: string = 'debug-two';");
     await runner.wait(e=>e.event==='ready'&&e.value==='debug-two');
+    await disconnected;
     const second=await inspector(debugPort);assert.notEqual(second.id,first.id);await inspect(second);
     await runner.stop();await assertPortFree(debugPort);await assertPortFree(appPort);
   });
@@ -131,5 +170,26 @@ describe('loopback debugging and source maps',{concurrency:false,timeout:90000},
     const runner=start(t,fixture,{port:appPort,args:[`--inspect=${debugPort}`]});
     await runner.wait(e=>e.event==='startup-error');assert.equal(runner.records.some(e=>e.event==='started'),false);
     await runner.stop();await assertPortFree(appPort);
+  });
+  it('cleans up a debugger-paused application when the watcher is force-killed',async t=>{
+    const fixture=await project(t), appPort=await port(), debugPort=await port();
+    const runner=start(t,fixture,{port:appPort,args:[`--inspect=${debugPort}`]});
+    const ready=await runner.wait(e=>e.event==='ready');
+    const connection=await inspect(await inspector(debugPort),true);
+    await new Promise(resolve=>{
+      const listener=event=>{if(JSON.parse(event.data).method==='Debugger.paused'){connection.removeEventListener('message',listener);resolve();}};
+      connection.addEventListener('message',listener);connection.send(JSON.stringify({id:999,method:'Debugger.pause'}));
+      connection.send(JSON.stringify({id:1000,method:'Runtime.evaluate',params:{expression:'globalThis.probeStack()'}}));
+    });
+    try {
+      const exited=new Promise(resolve=>runner.child.once('exit',resolve));
+      runner.child.kill('SIGKILL');await exited;
+      await until(()=>assert.equal(alive(ready.pid),false),'Paused application outlived its watcher',2500);
+      await assertPortFree(debugPort);await assertPortFree(appPort);
+    } finally {
+      connection.close();
+      // Failed RED probes must also clean up the exact test-owned process.
+      if(alive(ready.pid))process.kill(ready.pid,'SIGKILL');
+    }
   });
 });

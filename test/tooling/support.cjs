@@ -18,11 +18,14 @@ async function until(operation, message, timeout = 10000) {
   }
   throw new Error(`${message}: ${last?.message}`);
 }
+const allocatedPorts = new Set();
 async function port() {
   const server = net.createServer();
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
   const value = server.address().port;
   await new Promise(resolve => server.close(resolve));
+  if (allocatedPorts.has(value)) return port();
+  allocatedPorts.add(value);
   return value;
 }
 async function assertPortFree(value) {
@@ -48,12 +51,14 @@ async function project(t, invalid = false) {
   await fs.writeFile(path.join(directory, 'src/main.ts'), MAIN);
   await fs.writeFile(path.join(directory, 'src/value.ts'), invalid ? 'export const value: string = 1;' : "export const value: string = 'one';");
   await fs.writeFile(path.join(directory, 'tsconfig.json'), JSON.stringify({compilerOptions:{target:'ES2021',module:'CommonJS',types:[],strict:true,skipLibCheck:true,sourceMap:true},include:['src/**/*.ts']}));
+  const fixture = { directory, main: path.join(directory, 'src/main.ts'), value: path.join(directory, 'src/value.ts'), runners: [] };
   t.after(async () => {
+    for (const runner of fixture.runners) await runner.stop();
     assert.equal(path.dirname(directory), path.resolve(os.tmpdir()));
     assert.ok(path.basename(directory).startsWith('portal-tooling-test-'));
     await fs.rm(directory, {recursive:true,force:true});
   });
-  return { directory, main: path.join(directory, 'src/main.ts'), value: path.join(directory, 'src/value.ts') };
+  return fixture;
 }
 function start(t, fixture, options = {}) {
   const args = ['--project', 'tsconfig.json', ...(options.args || [])];
@@ -77,7 +82,10 @@ function start(t, fixture, options = {}) {
       const timer = setTimeout(() => finish(new Error(`Runner completion timeout:\n${output.slice(-3000)}`)), 25000);
       function finish(error, value) { clearTimeout(timer); listeners.delete(check); error ? reject(error) : resolve(value); }
       function check() {
-        const record = records.slice(from).find(predicate);
+        // Application stdout and ownership IPC use different pipes. Require the
+        // owner's start acknowledgement before reporting application readiness.
+        const record = records.slice(from).find(record => predicate(record) &&
+          (record.event !== 'ready' || records.some(e => e.event === 'started' && e.pid === record.pid)));
         if (record) finish(null, record);
         else if (closed) finish(new Error(`Runner exited before expected event:\n${output.slice(-3000)}`));
       }
@@ -91,7 +99,9 @@ function start(t, fixture, options = {}) {
     finally { clearTimeout(timer); if (!closed) child.kill('SIGKILL'); }
   }
   t.after(stop);
-  return {child, records, exited, wait, stop, get output(){return output;}};
+  const runner = {child, records, exited, wait, stop, get output(){return output;}};
+  fixture.runners.push(runner);
+  return runner;
 }
 async function response(value) { return (await fetch(`http://127.0.0.1:${value}`, {signal:AbortSignal.timeout(2000)})).json(); }
 module.exports = {ROOT, MAIN, alive, until, port, assertPortFree, project, start, response};

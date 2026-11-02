@@ -3,8 +3,8 @@ const { join } = require('node:path');
 const { spawn } = require('node:child_process');
 
 const suite = process.argv[2] ?? 'unit';
-if (!['unit', 'integration', 'persistence'].includes(suite)) throw new Error(`Unknown suite: ${suite}`);
-const integration = suite !== 'unit';
+if (!['unit', 'integration', 'persistence', 'tooling'].includes(suite)) throw new Error(`Unknown suite: ${suite}`);
+const integration = ['integration', 'persistence'].includes(suite);
 if (integration && process.env.INTEGRATION_TESTS !== '1') {
   throw new Error('Set INTEGRATION_TESTS=1 and test-only REDIS_URL/COUCHDB_URL to run dependency tests');
 }
@@ -12,14 +12,14 @@ if (integration && process.env.INTEGRATION_TESTS !== '1') {
 function discover(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = join(directory, entry.name);
-    return entry.isDirectory() ? discover(path) : entry.name.endsWith('.test.ts') ? [path] : [];
+    return entry.isDirectory() ? discover(path) : /\.test\.(ts|cjs)$/.test(entry.name) ? [path] : [];
   });
 }
 
-const files = discover(suite === 'unit' ? 'src' : `test/${suite}`).sort();
+const files = (suite === 'unit' ? [...discover('src'), ...discover('test/tooling')] : discover(`test/${suite}`)).sort();
 if (!files.length) throw new Error('No test files discovered');
 const child = spawn(process.execPath, [
-  '--test', '--test-concurrency=1', '--test-reporter=tap', '--require', 'ts-node/register', ...files,
+  '--test', '--test-concurrency=1', '--test-reporter=tap', ...(suite === 'tooling' ? [] : ['--require', 'ts-node/register']), ...files,
 ], { stdio: ['inherit', 'pipe', 'inherit'] });
 let output = '';
 child.stdout.on('data', (chunk) => {
