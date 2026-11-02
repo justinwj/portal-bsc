@@ -46,10 +46,20 @@ async function bootstrap() {
 
   const allowMemoryFallback = !isProduction && process.env.ALLOW_IN_MEMORY_SESSION_STORE === 'true';
   if (!allowMemoryFallback) {
+    let connectionDeadline: ReturnType<typeof setTimeout>;
     try {
-      await redisClient.connect();
+      // The client's reconnect loop can otherwise keep startup pending indefinitely.
+      await Promise.race([
+        redisClient.connect(),
+        new Promise<never>((_resolve, reject) => {
+          connectionDeadline = setTimeout(() => reject(new Error('Redis connection timed out after 5000ms')), 5000);
+        }),
+      ]);
     } catch (error) {
+      if (redisClient.isOpen) redisClient.destroy();
       throw new Error(`Redis session store failed to initialize: ${(error as Error).message}`);
+    } finally {
+      clearTimeout(connectionDeadline);
     }
   }
 
