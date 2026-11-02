@@ -205,6 +205,17 @@ describe('production Compose storage and application container', { concurrency: 
     await verifyData();
   });
 
+  it('runs the production container on Node 22 at or above the rendering engine patch floor', async () => {
+    await ensureStack();
+    const result = await compose(['exec', '-T', 'app', 'node', '-e',
+      "const {createRequire}=require('node:module');const h=createRequire(require.resolve('express-handlebars'));const g=createRequire(h.resolve('glob'));const p=(pkg)=>({version:pkg.version,engines:pkg.engines});console.log(JSON.stringify({node:process.versions.node,renderer:p(require('express-handlebars/package.json')),glob:p(h('glob/package.json')),minimatch:p(g('minimatch/package.json'))}));"]);
+    const runtime = JSON.parse(result.stdout.trim());
+    const [major, minor, patch] = runtime.node.split('.').map(Number);
+    assert.equal(major, 22, 'Production must remain on the approved Node major');
+    assert.ok(minor > 23 || (minor === 23 && patch >= 4), `Rendering requires Node >=22.23.4; found ${runtime.node}`);
+    console.log('Verified production rendering runtime:', JSON.stringify(runtime));
+  });
+
   it('reads the existing NAS bind and rejects writes inside the actual production container', async () => {
     await ensureStack();
     const result = await compose(['exec', '-T', 'app', 'node', '-e',

@@ -2,6 +2,9 @@
 import 'reflect-metadata';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { basename, dirname, join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
@@ -21,6 +24,7 @@ type StoredSession = session.SessionData & { user?: SessionUser; csrfToken?: str
 class TemporaryCouchStore {
   readonly users = new Map<string, UserRecord>();
   readonly audits: string[] = [];
+  readonly additionalFiles = new Map<string, FileRecord>();
   fileLookupError?: Error;
   readonly file: FileRecord = {
     _id: 'test-file', type: 'file', title: 'Test document', description: 'HTTP view fixture',
@@ -49,12 +53,12 @@ class TemporaryCouchStore {
   }
 
   async listFiles() {
-    return [this.file];
+    return [this.file, ...this.additionalFiles.values()];
   }
 
   async findFileById(id: string) {
     if (this.fileLookupError) throw this.fileLookupError;
-    return id === this.file._id ? this.file : null;
+    return id === this.file._id ? this.file : this.additionalFiles.get(id) ?? null;
   }
 
   async logAudit(event: string) {
@@ -78,6 +82,7 @@ describe('CSRF HTTP integration', { concurrency: false }, () => {
   let app: NestExpressApplication;
   let sessionStore: session.MemoryStore;
   let baseUrl: string;
+  let viewDirectory: string;
 
   before(async () => {
     process.env.NODE_ENV = 'test';
@@ -106,7 +111,22 @@ describe('CSRF HTTP integration', { concurrency: false }, () => {
     app.use(express.urlencoded({ extended: false }));
     app.use(attachCsrfToken);
     app.use(csrfMiddleware);
-    configureViews(app);
+    // Exercise the production renderer on copies of the actual templates. A
+    // test-owned disk partial covers discovery without adding product markup.
+    viewDirectory = await mkdtemp(join(tmpdir(), 'portal-view-test-'));
+    await cp(join(process.cwd(), 'views'), join(viewDirectory, 'views'), { recursive: true });
+    await mkdir(join(viewDirectory, 'views/partials'), { recursive: true });
+    await writeFile(join(viewDirectory, 'views/partials/rendering-probe.hbs'),
+      '<aside data-rendering-probe>{{#if (eq user.role "admin")}}administrator{{else}}other{{/if}}</aside>');
+    const layoutPath = join(viewDirectory, 'views/layouts/main.hbs');
+    const layout = await readFile(layoutPath, 'utf8');
+    await writeFile(layoutPath, layout.replace('</main>', '{{> rendering-probe}}</main>'));
+    const originalDirectory = process.cwd();
+    try {
+      // configureViews resolves fixed paths synchronously, before any requests.
+      process.chdir(viewDirectory);
+      configureViews(app);
+    } finally { process.chdir(originalDirectory); }
     app.useGlobalPipes(new ValidationPipe({
       whitelist: true,
       transform: true,
@@ -120,6 +140,7 @@ describe('CSRF HTTP integration', { concurrency: false }, () => {
     database.users.clear();
     database.audits.length = 0;
     database.fileLookupError = undefined;
+    database.additionalFiles.clear();
     await new Promise<void>((resolve, reject) => sessionStore.clear((error) => error ? reject(error) : resolve()));
     await app.get(UsersService).createUser({ ...credentials, email: 'admin@example.test', role: UserRole.ADMIN });
   });
@@ -131,6 +152,11 @@ describe('CSRF HTTP integration', { concurrency: false }, () => {
       for (const [key, value] of Object.entries(previousEnvironment)) {
         if (value === undefined) delete process.env[key];
         else process.env[key] = value;
+      }
+      if (viewDirectory) {
+        assert.equal(dirname(viewDirectory), resolve(tmpdir()));
+        assert.ok(basename(viewDirectory).startsWith('portal-view-test-'));
+        await rm(viewDirectory, { recursive: true, force: true });
       }
     }
   });
@@ -387,6 +413,107 @@ describe('CSRF HTTP integration', { concurrency: false }, () => {
     assert.equal(response.status, 403, response.body);
     assert.match(response.body, /Admin access required/);
     assert.equal(await database.findUserByUsername(newUser.username), null);
+  });
+
+  describe('rendering security HTTP characterization', () => {
+    it('renders the login page with the configured layout, discovered partial and working CSRF form', async () => {
+      const client = browser();
+      const page = await client.request('/login');
+      assert.equal(page.status, 200, page.body);
+      assert.match(page.body, /<!DOCTYPE html>/);
+      assert.match(page.body, /<title>Login<\/title>/);
+      assert.match(page.body, /href="\/css\/styles.css"/);
+      assert.match(page.body, /<aside data-rendering-probe>other<\/aside>/);
+      const token = await getToken(client);
+      const login = await client.request('/login', { ...credentials, _csrf: token });
+      assert.equal(login.status, 302, login.body);
+      assert.equal((await client.request('/')).status, 200);
+    });
+
+    for (const role of [UserRole.ADMIN, UserRole.MEMBER]) {
+      it(`renders ${role} helpers and authorized file records without leaking other roles' metadata`, async () => {
+        for (const name of ['admin', 'member', 'public', 'empty']) {
+          database.additionalFiles.set(`render-${name}`, { ...database.file, _id: `render-${name}`,
+            title: `Render ${name} title`, description: `Render ${name} description`,
+            visibility: name === 'public' ? 'public' : 'private',
+            allowedRoles: name === 'admin' ? [UserRole.ADMIN] : name === 'member' ? [UserRole.MEMBER] : [] });
+        }
+        const { client } = await loggedIn(role);
+        const dashboard = await client.request('/');
+        assert.equal(dashboard.status, 200, dashboard.body);
+        assert.ok(dashboard.body.includes(`<aside data-rendering-probe>${role === UserRole.ADMIN ? 'administrator' : 'other'}</aside>`));
+        const files = await client.request('/files');
+        assert.equal(files.status, 200, files.body);
+        for (const name of ['admin', 'member', 'public', 'empty']) {
+          const file = database.additionalFiles.get(`render-${name}`);
+          if (name === role || name === 'public') {
+            assert.ok(files.body.includes(file.title));
+            assert.ok(files.body.includes(`/files/${file._id}`));
+            const details = await client.request(`/files/${file._id}`);
+            assert.equal(details.status, 200, details.body);
+            assert.ok(details.body.includes(file.description));
+          } else {
+            assert.ok(!files.body.includes(file.title));
+            assert.ok(!files.body.includes(file._id));
+            assert.ok(!dashboard.body.includes(file.title));
+            const denied = await client.request(`/files/${file._id}`);
+            assert.equal(denied.status, 404, denied.body);
+            assert.ok(!denied.body.includes(file.title));
+            assert.ok(!denied.body.includes(file.description));
+          }
+        }
+      });
+    }
+
+    it('HTML-escapes untrusted file metadata in lists, details and layout titles', async () => {
+      const file = { ...database.file, _id: 'escaped-file', title: '<script>title&</script>',
+        description: '<img>description&', category: '<b>category&</b>', mimeType: '<i>type&</i>', sha256: '<u>hash&</u>' };
+      database.additionalFiles.set(file._id, file);
+      const { client } = await loggedIn();
+      const escaped = { title: '&lt;script&gt;title&amp;&lt;/script&gt;', description: '&lt;img&gt;description&amp;',
+        category: '&lt;b&gt;category&amp;&lt;/b&gt;', mimeType: '&lt;i&gt;type&amp;&lt;/i&gt;', sha256: '&lt;u&gt;hash&amp;&lt;/u&gt;' };
+      for (const path of ['/files', `/files/${file._id}`]) {
+        const page = await client.request(path);
+        assert.equal(page.status, 200, page.body);
+        for (const field of path === '/files' ? ['title', 'category', 'mimeType'] : Object.keys(escaped)) {
+          assert.ok(page.body.includes(escaped[field]), `Missing escaped ${field} on ${path}`);
+          assert.ok(!page.body.includes(file[field]), `Unescaped ${field} on ${path}`);
+        }
+      }
+    });
+
+    it('HTML-escapes untrusted usernames on the dashboard and administrator page', async () => {
+      const { client } = await loggedIn();
+      const user = await database.findUserByUsername(credentials.username);
+      user.username = '<svg>account&</svg>';
+      for (const path of ['/', '/admin/users']) {
+        const page = await client.request(path);
+        assert.equal(page.status, 200, page.body);
+        assert.match(page.body, /&lt;svg&gt;account&amp;&lt;\/svg&gt;/);
+        assert.ok(!page.body.includes(user.username));
+      }
+    });
+
+    for (const fault of ['missing template', 'invalid partial']) {
+      it(`returns a controlled rendering error for a ${fault} without leaking server paths`, async () => {
+        const path = join(viewDirectory, 'views', fault === 'missing template' ? 'login.hbs' : 'partials/rendering-probe.hbs');
+        const original = await readFile(path, 'utf8');
+        try {
+          if (fault === 'missing template') await rename(path, `${path}.missing`);
+          else await writeFile(path, '{{#if}}');
+          const response = await browser().request('/login');
+          assert.equal(response.status, 500, response.body);
+          assert.deepEqual(JSON.parse(response.body), { statusCode: 500, message: 'Internal server error' });
+          assert.ok(!response.body.includes(viewDirectory));
+          assert.ok(!response.body.includes(process.cwd()));
+          assert.doesNotMatch(response.body, /node_modules|ENOENT|Failed to lookup|Parse error|stack/);
+        } finally {
+          if (fault === 'missing template') await rename(`${path}.missing`, path);
+          else await writeFile(path, original);
+        }
+        assert.equal((await browser().request('/login')).status, 200);
+      });
+    }
   });
 
   describe('framework migration HTTP characterization', () => {
