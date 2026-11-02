@@ -124,6 +124,23 @@ describe('compilation-aware development lifecycle', {concurrency:false,timeout:1
     await until(()=>assert.equal(alive(ready.pid),false),'Interrupted application remained alive');
     await assertPortFree(appPort);
   });
+  it('terminates an application that ignores graceful termination before restarting',async t=>{
+    const fixture=await project(t), appPort=await port();
+    await fs.writeFile(fixture.main,"process.on('SIGTERM', () => {});\n"+MAIN);
+    const runner=start(t,fixture,{port:appPort});
+    const first=await runner.wait(e=>e.event==='ready');
+    try {
+      await fs.writeFile(fixture.value,"export const value: string = 'after-resistant-process';");
+      const second=await runner.wait(e=>e.event==='ready'&&e.value==='after-resistant-process');
+      assert.notEqual(second.pid,first.pid);
+      assert.equal(alive(first.pid),false);
+      assert.ok(runner.records.filter(e=>e.event==='started').every(e=>!e.previousAlive));
+      assert.equal((await response(appPort)).value,'after-resistant-process');
+    } finally {
+      // A RED probe must not leave a deliberately signal-resistant test process.
+      if(alive(first.pid))process.kill(first.pid,'SIGKILL');
+    }
+  });
 });
 
 async function inspector(value){return until(async()=>{
