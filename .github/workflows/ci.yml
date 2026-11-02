@@ -71,6 +71,10 @@ jobs:
           REDIS_URL: redis://127.0.0.1:6379
           COUCHDB_URL: http://ci-admin:ci-only-password-not-for-production@127.0.0.1:5984
 
+      - name: Production security audit (block high and critical; report all findings)
+        if: ${{ !cancelled() && steps.install.conclusion == 'success' }}
+        run: npm audit --omit=dev --audit-level=high
+
   docker:
     name: Production image, Compose persistence, and startup smoke test
     runs-on: ubuntu-24.04
