@@ -2,7 +2,7 @@ import 'reflect-metadata';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm, stat, writeFile, unlink } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
@@ -16,6 +16,7 @@ import { browser, formToken } from '../integration/support';
 
 const exec = promisify(execFile);
 const nano = require('nano');
+const yaml = require('js-yaml');
 
 describe('production Compose storage and application container', { concurrency: false, timeout: 180000 }, () => {
   const project = `portal-ci-${randomUUID()}`;
@@ -167,7 +168,12 @@ describe('production Compose storage and application container', { concurrency: 
     assert.equal(mount.type, 'bind');
     assert.equal(mount.source, nasDirectory);
     assert.equal(mount.read_only, true);
-    assert.equal(mount.bind.create_host_path, false);
+    // Compose's JSON serializer omits false values; require the authored flag explicitly.
+    const authored = yaml.load(await readFile('docker-compose.app.yml', 'utf8'));
+    const declared = authored.services.app.volumes.find((entry: any) => entry.target === '/var/lib/portal-bsc/files');
+    assert.equal(declared.type, 'bind');
+    assert.equal(declared.read_only, true);
+    assert.equal(declared.bind.create_host_path, false);
   });
 
   it('rejects a missing NAS bind source without creating it on the Docker host', async () => {

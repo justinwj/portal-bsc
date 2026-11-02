@@ -46,6 +46,7 @@
     "@types/express-session": "^1.17.3",
     "@types/node": "^22.10.2",
     "@types/uuid": "^10.0.0",
+    "js-yaml": "4.3.2",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.0.0",
     "typescript": "^5.7.2"
