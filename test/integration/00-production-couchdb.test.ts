@@ -122,7 +122,10 @@ describe('production CouchDB authentication and administrator bootstrap', { conc
 
   it('does not turn a failed production initialization into success on retry', async () => {
     try {
-      const invalid = new URL(legacyUrl); invalid.password = 'invalid-test-password';
+      // Isolate repeated negative requests from the shared valid administrator's lockout counter.
+      const invalid = new URL(legacyUrl);
+      invalid.username = `ci-invalid-${randomUUID()}`;
+      invalid.password = 'invalid-test-password';
       process.env.COUCHDB_URL = invalid.toString();
       const service = new CouchDbService();
       await assert.rejects(service.initialize());
