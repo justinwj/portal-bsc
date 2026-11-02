@@ -11,8 +11,7 @@ const fakeDb = {
     { _id: '2', type: 'file', title: 'public-doc', description: '', storedFilename: 'b.pdf', originalFilename: 'b.pdf', mimeType: 'application/pdf', sizeBytes: 1, sha256: 'x', category: 'docs', visibility: 'public', allowedRoles: [], uploadedByUserId: 'u', createdAt: '', updatedAt: '' },
     { _id: '3', type: 'file', title: 'member-only', description: '', storedFilename: 'c.pdf', originalFilename: 'c.pdf', mimeType: 'application/pdf', sizeBytes: 1, sha256: 'x', category: 'docs', visibility: 'private', allowedRoles: [], uploadedByUserId: 'u', createdAt: '', updatedAt: '' },
   ],
-  findFileById: async (id: string) => ({
-    _id: '1', type: 'file', title: 'staff-only', description: '', storedFilename: 'a.pdf', originalFilename: 'a.pdf', mimeType: 'application/pdf', sizeBytes: 1, sha256: 'x', category: 'docs', visibility: 'private', allowedRoles: [UserRole.ADMIN], uploadedByUserId: 'u', createdAt: '', updatedAt: '' } ),
+  findFileById: async (id: string) => (await fakeDb.listFiles()).find((file) => file._id === id) ?? null,
   findUserByUsername: async () => null,
   findUserById: async () => null,
 };
@@ -23,6 +22,31 @@ const authService = new AuthService({ findByUsername: async () => ({
 }) } as any);
 
 const userService = new UsersService(fakeDb as any);
+
+test('file lookup fixture returns the requested ID and null for a missing ID', async () => {
+  for (const id of ['1', '2', '3']) assert.equal((await fakeDb.findFileById(id))?._id, id);
+  assert.equal(await fakeDb.findFileById('missing'), null);
+});
+
+test('administrators cannot retrieve private files with empty allowedRoles', async () => {
+  await assert.rejects(filesService.getFileForDownload('3', { id: 'admin', username: 'admin', email: 'admin@example.test', role: UserRole.ADMIN }), /not available/i);
+});
+
+test('members cannot retrieve an administrator-only file using its valid ID', async () => {
+  await assert.rejects(filesService.getFileForDownload('1', { id: 'member', username: 'member', email: 'member@example.test', role: UserRole.MEMBER }), /not available/i);
+});
+
+test('nonexistent file IDs are not found even for administrators', async () => {
+  await assert.rejects(filesService.getFileForDownload('missing', { id: 'admin', username: 'admin', email: 'admin@example.test', role: UserRole.ADMIN }), /File not found/);
+});
+
+for (const role of [UserRole.ADMIN, UserRole.MEMBER]) {
+  test(`public file IDs remain accessible to authenticated ${role} users`, async () => {
+    const file = await filesService.getFileForDownload('2', { id: role, username: role, email: `${role}@example.test`, role });
+    assert.equal(file._id, '2');
+    assert.equal(file.visibility, 'public');
+  });
+}
 
 test('private files deny access when allowedRoles is empty', async () => {
   await assert.rejects(() => filesService.getFileForDownload('3', { id: 'u1', username: 'alice', email: 'a@test.com', role: UserRole.MEMBER }), /not available/i);

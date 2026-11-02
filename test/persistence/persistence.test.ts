@@ -2,7 +2,9 @@ import 'reflect-metadata';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { writeFile, unlink } from 'node:fs/promises';
+import { mkdtemp, rm, stat, writeFile, unlink } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
 import { after, before, describe, it } from 'node:test';
 import { CouchDbService } from '../../src/common/couchdb.service';
@@ -25,21 +27,25 @@ describe('production Compose storage and application container', { concurrency: 
   let initialized = false;
   let volumeName: string;
   let records: { user: any; file: any; audit: any };
+  let nasDirectory: string;
 
-  async function compose(args: string[], override = true) {
+  async function compose(args: string[], override = true, environment: NodeJS.ProcessEnv = {}) {
     return exec('docker', ['compose', '--project-name', project, '--env-file', '.env',
       '-f', 'docker-compose.app.yml', ...(override ? ['-f', 'test/persistence/compose.ci.yml'] : []), ...args],
-    { timeout: 60000, maxBuffer: 2 * 1024 * 1024 });
+    { timeout: 60000, maxBuffer: 2 * 1024 * 1024, env: { ...process.env, ...environment } });
   }
 
   before(async () => {
     assert.equal(process.env.GITHUB_ACTIONS, 'true', 'Only disposable GitHub-hosted CI resources may run this suite');
     assert.equal(process.env.INTEGRATION_TESTS, '1');
+    nasDirectory = await mkdtemp(join(tmpdir(), 'portal-compose-nas-'));
+    await writeFile(join(nasDirectory, 'sentinel.txt'), 'pre-existing NAS fixture');
     // Exclusive creation: never replace a user's environment file.
     await writeFile('.env', [
       'NODE_ENV=production', `SESSION_SECRET=${randomUUID()}`, 'COUCHDB_USER=ci-admin',
       `COUCHDB_PASSWORD=${password}`, 'ADMIN_USERNAME=persistence-admin',
       'ADMIN_EMAIL=persistence@example.test', `ADMIN_PASSWORD=${adminPassword}`,
+      `NAS_FILES_HOST_PATH=${nasDirectory}`,
     ].join('\n'), { flag: 'wx' });
     createdEnv = true;
     Object.assign(process.env, { NODE_ENV: 'production', COUCHDB_URL: 'http://127.0.0.1:5984',
@@ -59,7 +65,10 @@ describe('production Compose storage and application container', { concurrency: 
           assert.equal(JSON.parse(result.stdout)[0].Name, volumeName, 'Cleanup must retain the data volume');
         }
       }
-    } finally { if (createdEnv) await unlink('.env'); }
+    } finally {
+      if (createdEnv) await unlink('.env');
+      if (nasDirectory) await rm(nasDirectory, { recursive: true, force: true });
+    }
   });
 
   async function productionConfig() {
@@ -148,6 +157,32 @@ describe('production Compose storage and application container', { concurrency: 
       'Production CouchDB must use a persistent named volume');
   });
 
+  it('requires an explicit production NAS host path instead of supplying a replacement default', async () => {
+    await assert.rejects(compose(['config', '--format', 'json'], false, { NAS_FILES_HOST_PATH: '' }), /NAS_FILES_HOST_PATH/);
+  });
+
+  it('configures the production NAS mount read-only with host-directory creation disabled', async () => {
+    const config = await productionConfig();
+    const mount = config.services.app.volumes.find((entry: any) => entry.target === '/var/lib/portal-bsc/files');
+    assert.equal(mount.type, 'bind');
+    assert.equal(mount.source, nasDirectory);
+    assert.equal(mount.read_only, true);
+    assert.equal(mount.bind.create_host_path, false);
+  });
+
+  it('rejects a missing NAS bind source without creating it on the Docker host', async () => {
+    const path = join(nasDirectory, 'missing-host-bind');
+    let failure: unknown;
+    try {
+      await compose(['run', '--rm', '--no-deps', '--entrypoint', 'node', 'app', '-e', 'process.exit(0)'], true,
+        { NAS_FILES_HOST_PATH: path });
+    } catch (error) { failure = error; }
+    let created = false;
+    try { await stat(path); created = true; } catch (error: any) { if (error.code !== 'ENOENT') throw error; }
+    assert.equal(created, false, 'Compose must not silently create a missing NAS directory');
+    assert.ok(failure, 'The Docker mount operation must reject a missing bind source');
+  });
+
   it('initializes a fresh production stack, bootstraps an administrator, and persists records', async () => {
     await ensureStack();
     for (const name of ['portal_users', 'portal_files', 'portal_audit', 'portal_downloads']) {
@@ -162,6 +197,13 @@ describe('production Compose storage and application container', { concurrency: 
     await ready(() => client.db.get('portal_users'));
     assert.equal((await dataMount()).volume, volumeName);
     await verifyData();
+  });
+
+  it('reads the existing NAS bind and rejects writes inside the actual production container', async () => {
+    await ensureStack();
+    const result = await compose(['exec', '-T', 'app', 'node', '-e',
+      "const fs=require('fs');const root='/var/lib/portal-bsc/files';if(fs.readFileSync(root+'/sentinel.txt','utf8')!=='pre-existing NAS fixture')throw Error('Wrong NAS mount');try{fs.writeFileSync(root+'/forbidden-write','x');process.exitCode=2;}catch(error){if(error.code!=='EROFS')throw error;console.log('Read-only NAS mount enforced');}"]);
+    assert.match(result.stdout, /Read-only NAS mount enforced/);
   });
 
   it('retains the same volume and records after container recreation and fresh application startup', async () => {
