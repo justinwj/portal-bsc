@@ -11,7 +11,7 @@ Release-1 internal file portal scaffold for a Synology NAS deployment. This is i
 - Secure file downloads with authorization checks before content is served
 - Bcrypt password hashing and inactive-user blocking
 - Helmet and rate limiting on HTTP entry points
-- CSRF protection for SSR forms using `csurf` with session-backed tokens
+- CSRF protection for SSR forms with session-backed tokens
 - Redis-backed session storage in production mode
 - Audit logging for login success/failure and downloads
 - `/healthz` JSON health endpoint
@@ -48,8 +48,9 @@ Release-1 internal file portal scaffold for a Synology NAS deployment. This is i
 ## Production deployment notes
 - Expect Redis and CouchDB to be internal services, not published publicly.
 - Use Nginx in front of the app for TLS termination and reverse proxying.
-- Set `SESSION_SECRET`, `ADMIN_PASSWORD`, and the other required values through environment variables or a deployment secret manager.
-- For Synology NAS deployments, mount the NAS files directory into the container and point `NAS_FILES_DIR` to that location.
+- Set runtime secrets through protected environment variables or a deployment secret manager. `ADMIN_*` values are required only for explicit administrator bootstrap and should be removed from the runtime environment after verified initialization.
+- Production requires an existing, readable/searchable NAS directory; the app does not create a replacement and needs no NAS write access. Set `NAS_FILES_HOST_PATH` explicitly for the read-only Compose bind to `/var/lib/portal-bsc/files`; missing bind sources must fail.
+- Follow [DS925+ readiness and NAS preflight](docs/ds925-production-readiness.md) before any separately approved deployment, including Container Manager/Compose compatibility checks.
 
 ## Docker and reverse proxy
 - `Dockerfile` uses a multi-stage build.
@@ -60,7 +61,9 @@ Release-1 internal file portal scaffold for a Synology NAS deployment. This is i
 Run:
 `npm run seed:admin`
 
-This will create an admin if one does not exist, promote an existing non-admin user to admin, or report that an admin is already present.
+Supply valid `ADMIN_USERNAME`, `ADMIN_EMAIL`, and `ADMIN_PASSWORD` inputs plus authenticated CouchDB configuration. Bootstrap verifies persistent CouchDB and either creates/verifies a new administrator or preserves the same existing active administrator and its password. **Member username collisions are rejected, never automatically promoted.** Disabled administrators require explicit recovery. Repeating bootstrap is not a password reset.
+
+Remove all three bootstrap inputs from the runtime environment and recreate the app container after verifying login. Keep the administrator login secret separately; retain required CouchDB/session runtime secrets. See the [bootstrap policy](docs/ds925-production-readiness.md#administrator-initialization-and-collision-policy).
 
 ## Known limitations
 - R1 is intentionally scoped to role-based authorization; it is not yet a complete per-user permission model.

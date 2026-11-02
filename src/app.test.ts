@@ -12,16 +12,9 @@ const fakeDb = {
     { _id: '3', type: 'file', title: 'member-only', description: '', storedFilename: 'c.pdf', originalFilename: 'c.pdf', mimeType: 'application/pdf', sizeBytes: 1, sha256: 'x', category: 'docs', visibility: 'private', allowedRoles: [], uploadedByUserId: 'u', createdAt: '', updatedAt: '' },
   ],
   findFileById: async (id: string) => (await fakeDb.listFiles()).find((file) => file._id === id) ?? null,
-  findUserByUsername: async () => null,
-  findUserById: async () => null,
 };
 
 const filesService = new FilesService(fakeDb as any);
-const authService = new AuthService({ findByUsername: async () => ({
-  _id: 'u1', username: 'alice', email: 'a@test.com', passwordHash: 'hash', role: UserRole.MEMBER, isActive: true,
-}) } as any);
-
-const userService = new UsersService(fakeDb as any);
 
 test('file lookup fixture returns the requested ID and null for a missing ID', async () => {
   for (const id of ['1', '2', '3']) assert.equal((await fakeDb.findFileById(id))?._id, id);
@@ -41,6 +34,13 @@ test('nonexistent file IDs are not found even for administrators', async () => {
 });
 
 for (const role of [UserRole.ADMIN, UserRole.MEMBER]) {
+  test(`file listings apply the same role policy as downloads for ${role}`, async () => {
+    const user = { id: role, username: role, email: `${role}@example.test`, role };
+    const listed = await filesService.listFilesForUser(user);
+    assert.deepEqual(listed.map((file) => file._id).sort(), role === UserRole.ADMIN ? ['1', '2'] : ['2']);
+    for (const file of listed) assert.equal((await filesService.getFileForDownload(file._id, user))._id, file._id);
+  });
+
   test(`public file IDs remain accessible to authenticated ${role} users`, async () => {
     const file = await filesService.getFileForDownload('2', { id: role, username: role, email: `${role}@example.test`, role });
     assert.equal(file._id, '2');

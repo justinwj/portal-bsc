@@ -17,6 +17,7 @@ describe('NAS filesystem boundary', { concurrency: false }, () => {
     root = await mkdtemp(join(tmpdir(), 'portal-file-unit-'));
     process.env.NAS_FILES_DIR = root;
     await writeFile(join(root, 'valid.pdf'), 'actual file contents');
+    await writeFile(join(root, 'empty.pdf'), '');
     await mkdir(join(root, 'directory'));
   });
   after(async () => {
@@ -37,6 +38,14 @@ describe('NAS filesystem boundary', { concurrency: false }, () => {
     await assert.rejects(service.readFileStream(record('absent.pdf')), NotFoundException);
   });
 
+  it('streams an empty regular file without hanging or inventing contents', { timeout: 5000 }, async () => {
+    const result = await service.readFileStream(record('empty.pdf'));
+    let length = 0;
+    for await (const chunk of result.stream) length += chunk.length;
+    assert.equal(result.size, 0);
+    assert.equal(length, 0);
+  });
+
   it('rejects directories before returning a file stream', async () => {
     await assert.rejects(async () => {
       const result = await service.readFileStream(record('directory'));
@@ -48,7 +57,7 @@ describe('NAS filesystem boundary', { concurrency: false }, () => {
 
   for (const name of ['', '.', '..', '../valid.pdf', '..\\valid.pdf', '/valid.pdf',
     'C:\\valid.pdf', '\\\\host\\valid.pdf', 'nested/valid.pdf', 'valid.pdf\0tail',
-    'valid.pdf:alternate-stream', ' valid.pdf', 'valid.pdf ', null, undefined]) {
+    'valid.pdf:alternate-stream', ' valid.pdf', 'valid.pdf ', '\ud800.pdf', null, undefined]) {
     it(`rejects unsafe stored filename ${JSON.stringify(name)} instead of rewriting it`, () => {
       assert.throws(() => service.getSecureFilePath(record(name)), NotFoundException);
     });

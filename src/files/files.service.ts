@@ -10,12 +10,13 @@ export class FilesService {
   private storageRoot?: string;
   constructor(private readonly couchDbService: CouchDbService) {}
 
+  private canRead(file: FileRecord, user: SessionUser) {
+    return file.visibility === 'public' || (Array.isArray(file.allowedRoles) && file.allowedRoles.includes(user.role));
+  }
+
   async listFilesForUser(user: SessionUser) {
     const files = await this.couchDbService.listFiles();
-    return files.filter((file) => {
-      const allowed = Array.isArray(file.allowedRoles) && file.allowedRoles.length > 0 ? file.allowedRoles : [];
-      return file.visibility === 'public' || allowed.includes(user.role);
-    });
+    return files.filter((file) => this.canRead(file, user));
   }
 
   async listAllFiles() {
@@ -50,26 +51,25 @@ export class FilesService {
       throw new NotFoundException('File not found');
     }
 
-    if (file.visibility === 'public') {
-      return file;
-    }
-
-    const allowedRoles = Array.isArray(file.allowedRoles) ? file.allowedRoles : [];
-    if (allowedRoles.length === 0 || !allowedRoles.includes(user.role)) {
+    if (!this.canRead(file, user)) {
       throw new NotFoundException('File not available to your role');
     }
 
     return file;
   }
 
-  getSecureFilePath(file: FileRecord) {
-    const name = file.storedFilename;
+  private storedName(name: unknown): string {
     if (typeof name !== 'string' || !name || name === '.' || name === '..' || name.trim() !== name
+      || Buffer.from(name, 'utf8').toString('utf8') !== name
       || /[\\/\x00-\x1f\x7f<>:"|?*]/.test(name) || /[. ]$/.test(name)
       || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name)) {
       throw new NotFoundException('Stored file not available');
     }
-    return resolve(this.storageRoot ?? process.env.NAS_FILES_DIR ?? './data/files', name);
+    return name;
+  }
+
+  getSecureFilePath(file: FileRecord) {
+    return resolve(this.storageRoot ?? (process.env.NAS_FILES_DIR || './data/files'), this.storedName(file.storedFilename));
   }
 
   private async validateStorageRoot() {
@@ -94,14 +94,27 @@ export class FilesService {
     this.storageRoot = await this.validateStorageRoot();
   }
 
+  private waitForFirstRead(stream: ReadStream) {
+    // Keep an error listener installed until the HTTP pipeline takes ownership.
+    stream.on('error', () => undefined);
+    return new Promise<void>((resolveReady, reject) => {
+      const cleanup = () => { stream.off('readable', ready); stream.off('end', ready); stream.off('error', failed); };
+      const ready = () => { cleanup(); resolveReady(); };
+      const failed = (error: Error) => { cleanup(); reject(error); };
+      stream.once('readable', ready);
+      stream.once('end', ready);
+      stream.once('error', failed);
+    });
+  }
+
   async readFileStream(file: FileRecord) {
     let handle: FileHandle | undefined;
     let stream: ReadStream | undefined;
     try {
       // Validate the literal name before performing filesystem operations.
-      this.getSecureFilePath(file);
+      const name = this.storedName(file.storedFilename);
       this.storageRoot ??= await this.validateStorageRoot();
-      const target = this.getSecureFilePath(file);
+      const target = resolve(this.storageRoot, name);
       const entry = await fs.lstat(target, { bigint: true });
       if (!entry.isFile() || entry.isSymbolicLink()) throw new NotFoundException('Stored file not available');
       const canonical = await fs.realpath(target);
@@ -119,16 +132,7 @@ export class FilesService {
       const size = Number(opened.size);
       if (!Number.isSafeInteger(size) || size < 0) throw new Error('Unsupported file size');
       stream = handle.createReadStream({ autoClose: true, ...(size ? { end: size - 1 } : {}) });
-      // Keep an error listener installed until the HTTP pipeline takes ownership.
-      stream.on('error', () => undefined);
-      await new Promise<void>((resolveReady, reject) => {
-        const cleanup = () => { stream!.off('readable', ready); stream!.off('end', ready); stream!.off('error', failed); };
-        const ready = () => { cleanup(); resolveReady(); };
-        const failed = (error: Error) => { cleanup(); reject(error); };
-        stream!.once('readable', ready);
-        stream!.once('end', ready);
-        stream!.once('error', failed);
-      });
+      await this.waitForFirstRead(stream);
       return { stream, size };
     } catch (error: any) {
       if (stream) stream.destroy();
