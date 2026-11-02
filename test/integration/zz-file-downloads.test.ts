@@ -51,7 +51,8 @@ describe('real HTTP file authorization and filesystem safety', { concurrency: fa
     ];
     const files = new FilesService(couch);
     for (const [name, storedFilename, allowedRoles, visibility] of specs) {
-      const file = await files.createSeedFile({ title: `download-${name}-${randomUUID()}`, storedFilename,
+      const file = await files.createSeedFile({ title: `download-${name}-${randomUUID()}`,
+        description: `Confidential description for ${name} ${randomUUID()}`, storedFilename,
         originalFilename: 'NAS report.pdf', mimeType: 'application/pdf', sizeBytes: content.length,
         sha256: 'fixture', allowedRoles, visibility });
       metadata.set(name, file); downloadIds.add(file._id);
@@ -92,6 +93,35 @@ describe('real HTTP file authorization and filesystem safety', { concurrency: fa
   async function requestFile(app: { url: string }, http: ReturnType<typeof browser>, id: string) {
     return fetch(`${app.url}/download/${id}`, { headers: { cookie: http.cookie, 'x-forwarded-proto': 'https' },
       redirect: 'manual', signal: AbortSignal.timeout(5000) });
+  }
+
+  for (const [role, name] of [[UserRole.MEMBER, 'admin'], [UserRole.ADMIN, 'empty']] as const) {
+    it(`hides unauthorized ${name} file details from ${role} without exposing metadata`, async () => {
+      const file = metadata.get(name);
+      await withApp(async (_app, http) => {
+        const response = await http.request(`/files/${file._id}`);
+        assert.equal(response.status, 404, response.body);
+        for (const value of [file._id, file.title, file.description, file.storedFilename, file.originalFilename, file.sha256]) {
+          assert.ok(!response.body.includes(value), `Unauthorized response exposed ${value}`);
+        }
+      }, role);
+    });
+  }
+
+  for (const role of [UserRole.ADMIN, UserRole.MEMBER]) {
+    it(`renders authorized file details for ${role}`, async () => {
+      const file = metadata.get(role);
+      await withApp(async (_app, http) => {
+        const response = await http.request(`/files/${file._id}`);
+        assert.equal(response.status, 200, response.body);
+        assert.match(response.headers.get('content-type') ?? '', /^text\/html/);
+        assert.ok(response.body.includes(file.title));
+        assert.ok(response.body.includes(file.description));
+        assert.ok(response.body.includes(file.mimeType));
+        assert.ok(response.body.includes(file.sha256));
+        assert.ok(response.body.includes(`/download/${file._id}`));
+      }, role);
+    });
   }
 
   it('rejects unauthenticated downloads without a download audit', async () => {
