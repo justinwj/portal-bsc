@@ -43,15 +43,19 @@ test('auth rejects inactive users', async () => {
   assert.equal(result, null);
 });
 
-test('user service seed admin should promote existing non-admin', async () => {
+test('user service seed admin rejects non-admin collisions without modifying the account', async () => {
+  const existing = { _id: 'x', username: 'q', email: 'q@example.test', passwordHash: 'original-hash', role: UserRole.MEMBER, isActive: true };
+  const before = { ...existing };
+  let writes = 0;
   const svc = new UsersService({
-    findUserByUsername: async () => ({ _id: 'x', username: 'q', email: 'x', passwordHash: 'hash', role: UserRole.MEMBER, isActive: true }),
-    findUserById: async () => ({ _id: 'x', username: 'q', email: 'x', passwordHash: 'hash', role: UserRole.MEMBER, isActive: true }),
-    saveUser: async (user: any) => ({ ...user, role: UserRole.ADMIN }),
-    createUser: async () => ({ _id: 'n', username: 'x', email: 'x', passwordHash: 'hash', role: UserRole.ADMIN, isActive: true }),
+    findUserByUsername: async () => ({ ...existing }),
+    findUserById: async () => ({ ...existing }),
+    saveUser: async (user: any) => { writes++; return user; },
+    createUser: async () => { writes++; throw new Error('Unexpected user creation'); },
   } as any);
-  const res = await svc.seedAdmin('q', 'x', 'secret');
-  assert.equal(res.message, 'admin-promoted');
+  await assert.rejects(svc.seedAdmin('q', 'different@example.test', 'DifferentPassword123'), /non-administrator|not an administrator|collision/i);
+  assert.equal(writes, 0);
+  assert.deepEqual(existing, before);
 });
 
 test('csrf middleware rejects requests without a token', async () => {

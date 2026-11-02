@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { UserRole } from './roles';
+import { couchDbConnection } from '../config/couchdb.configuration';
 
 const nano = require('nano');
 
@@ -67,36 +68,41 @@ export class CouchDbService {
   private initialized = false;
 
   constructor() {
-    const couchDbUrl = process.env.COUCHDB_URL || 'http://localhost:5984';
     try {
-      const client = nano(couchDbUrl);
+      const connection = couchDbConnection();
+      const client = nano({ url: connection.url, requestDefaults: { auth: connection.auth, timeout: 5000 } });
       this.db = client.db;
     } catch (error) {
+      if (process.env.NODE_ENV === 'production') throw error;
       this.logger.warn('CouchDB unavailable, using in-memory fallback store only for local development');
     }
   }
 
-  async initialize() {
+  async initialize(options: { allowMemoryFallback?: boolean } = {}) {
+    const allowMemoryFallback = process.env.NODE_ENV !== 'production' && options.allowMemoryFallback !== false;
     if (this.initialized) {
+      if (!this.db && !allowMemoryFallback) throw new Error('Persistent CouchDB is required');
       return;
     }
-    this.initialized = true;
 
     if (!this.db) {
-      if (process.env.NODE_ENV === 'production') {
-        throw new Error('CouchDB is required in production mode');
+      if (!allowMemoryFallback) {
+        throw new Error('Persistent CouchDB is required');
       }
+      this.initialized = true;
       return;
     }
 
     try {
       await this.ensureDatabases();
+      this.initialized = true;
     } catch (error: any) {
-      if (process.env.NODE_ENV === 'production') {
+      if (!allowMemoryFallback) {
         throw new Error(`CouchDB readiness check failed: ${error?.message ?? String(error)}`);
       }
       this.logger.warn(`CouchDB unavailable in local mode: ${error?.message ?? String(error)}`);
       this.db = undefined;
+      this.initialized = true;
     }
   }
 

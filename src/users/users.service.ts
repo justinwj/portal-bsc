@@ -1,5 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
+import { plainToInstance } from 'class-transformer';
+import { validateSync } from 'class-validator';
 import { CreateUserDto } from '../common/dto/common.dto';
 import { CouchDbService, UserRecord } from '../common/couchdb.service';
 import { UserRole } from '../common/roles';
@@ -70,14 +72,19 @@ export class UsersService {
   }
 
   async seedAdmin(username: string, email: string, password: string) {
+    const dto = plainToInstance(CreateUserDto, { username, email, password, role: UserRole.ADMIN });
+    const errors = validateSync(dto);
+    if (!username?.trim() || errors.length) {
+      throw new BadRequestException('Admin bootstrap requires a username, a valid email, and a password of at least 8 characters including uppercase, lowercase, and a digit');
+    }
     const existing = await this.couchDbService.findUserByUsername(username);
     if (existing) {
       if (existing.role === UserRole.ADMIN) {
+        if (!existing.isActive) throw new BadRequestException('Existing administrator is disabled; explicit recovery is required');
         return { ...existing, message: 'admin-already-present' };
       }
 
-      const promoted = await this.promoteToAdmin(existing._id!);
-      return { ...promoted, message: 'admin-promoted' };
+      throw new BadRequestException('Bootstrap username collision: existing account is not an administrator and was not modified');
     }
 
     const created = await this.createUser({
@@ -86,6 +93,10 @@ export class UsersService {
       password,
       role: UserRole.ADMIN,
     });
-    return { ...created, message: 'admin-created' };
+    const verified = await this.couchDbService.findUserById(created._id!);
+    if (!verified || verified.username !== username || verified.role !== UserRole.ADMIN || !verified.isActive) {
+      throw new Error('Created administrator could not be verified in CouchDB');
+    }
+    return { ...verified, message: 'admin-created' };
   }
 }

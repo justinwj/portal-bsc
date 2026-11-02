@@ -1,5 +1,6 @@
 import { plainToInstance } from 'class-transformer';
 import { IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Max, Min, validateSync } from 'class-validator';
+import { couchDbConnection } from './couchdb.configuration';
 
 class EnvironmentVariables {
   @IsEnum(['development', 'test', 'production'])
@@ -73,12 +74,13 @@ export function validateEnv(config: Record<string, any>) {
   }
 
   if (merged.NODE_ENV === 'production') {
-    const required = ['SESSION_SECRET', 'REDIS_URL', 'COUCHDB_URL', 'NAS_FILES_DIR', 'ADMIN_USERNAME', 'ADMIN_EMAIL', 'ADMIN_PASSWORD'];
+    const required = ['SESSION_SECRET', 'REDIS_URL', 'COUCHDB_URL', 'NAS_FILES_DIR'];
     for (const key of required) {
       if (!merged[key] || String(merged[key]).trim() === '') {
         throw new Error(`Production environment requires ${key}`);
       }
     }
+    couchDbConnection(merged, true);
   }
 
   return merged;

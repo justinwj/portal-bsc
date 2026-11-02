@@ -7,6 +7,8 @@ export default () => {
     sessionSecret: isProduction ? process.env.SESSION_SECRET : process.env.SESSION_SECRET ?? 'development-session-secret',
     redisUrl: isProduction ? process.env.REDIS_URL : process.env.REDIS_URL ?? 'redis://localhost:6379',
     couchDbUrl: isProduction ? process.env.COUCHDB_URL : process.env.COUCHDB_URL ?? 'http://localhost:5984',
+    couchDbUser: process.env.COUCHDB_USER,
+    couchDbPassword: process.env.COUCHDB_PASSWORD,
     nasFilesDir: isProduction ? process.env.NAS_FILES_DIR : process.env.NAS_FILES_DIR ?? './data/files',
     adminUsername: isProduction ? process.env.ADMIN_USERNAME : process.env.ADMIN_USERNAME ?? 'admin',
     adminEmail: isProduction ? process.env.ADMIN_EMAIL : process.env.ADMIN_EMAIL ?? 'admin@example.com',

@@ -137,6 +137,13 @@ describe('production Compose storage and application container', { concurrency: 
     await productionConfig();
   });
 
+  it('requires a persistent CouchDB data volume in production Compose independently of authentication', async () => {
+    const result = await compose(['config', '--format', 'json'], false);
+    const config = JSON.parse(result.stdout);
+    assert.ok(config.services.couchdb.volumes?.some((mount: any) => mount.type === 'volume' && mount.target === '/opt/couchdb/data'),
+      'Production CouchDB must use a persistent named volume');
+  });
+
   it('initializes a fresh production stack, bootstraps an administrator, and persists records', async () => {
     await ensureStack();
     for (const name of ['portal_users', 'portal_files', 'portal_audit', 'portal_downloads']) {
