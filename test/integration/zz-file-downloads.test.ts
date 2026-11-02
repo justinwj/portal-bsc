@@ -185,6 +185,25 @@ describe('real HTTP file authorization and filesystem safety', { concurrency: fa
     assert.deepEqual(await downloadAudits(), before);
   });
 
+  it('preserves download parameter decoding, exact route matching and malformed-URL error handling', async () => {
+    const file = metadata.get('public');
+    await withApp(async (app, http) => {
+      const encodedId = file._id.replace('-', '%2D');
+      const response = await requestFile(app, http, encodedId);
+      assert.equal(response.status, 200);
+      assert.deepEqual(Buffer.from(await response.arrayBuffer()), content);
+      for (const [id, status] of [[`${file._id}/extra`, 404], ['%E0%A4%A', 400]] as const) {
+        const rejected = await requestFile(app, http, id);
+        assert.equal(rejected.status, status);
+        const body = await rejected.text();
+        assert.ok(!body.includes(file.title));
+        assert.ok(!body.includes(root));
+        assert.doesNotMatch(body, /Actual NAS fixture|OUTSIDE SECRET/);
+      }
+      assert.equal((await http.request('/healthz')).status, 200);
+    }, UserRole.MEMBER);
+  });
+
   for (const name of ['missing', 'directory', 'traversal', 'escape', 'denied']) {
     it(`rejects ${name} filesystem access without data leakage, successful audit, or process crash`, async () => {
       const file = metadata.get(name);

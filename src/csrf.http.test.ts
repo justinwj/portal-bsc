@@ -21,6 +21,7 @@ type StoredSession = session.SessionData & { user?: SessionUser; csrfToken?: str
 class TemporaryCouchStore {
   readonly users = new Map<string, UserRecord>();
   readonly audits: string[] = [];
+  fileLookupError?: Error;
   readonly file: FileRecord = {
     _id: 'test-file', type: 'file', title: 'Test document', description: 'HTTP view fixture',
     storedFilename: 'test.pdf', originalFilename: 'test.pdf', mimeType: 'application/pdf',
@@ -52,6 +53,7 @@ class TemporaryCouchStore {
   }
 
   async findFileById(id: string) {
+    if (this.fileLookupError) throw this.fileLookupError;
     return id === this.file._id ? this.file : null;
   }
 
@@ -117,6 +119,7 @@ describe('CSRF HTTP integration', { concurrency: false }, () => {
   beforeEach(async () => {
     database.users.clear();
     database.audits.length = 0;
+    database.fileLookupError = undefined;
     await new Promise<void>((resolve, reject) => sessionStore.clear((error) => error ? reject(error) : resolve()));
     await app.get(UsersService).createUser({ ...credentials, email: 'admin@example.test', role: UserRole.ADMIN });
   });
@@ -136,11 +139,11 @@ describe('CSRF HTTP integration', { concurrency: false }, () => {
     let cookie = '';
     return {
       get cookie() { return cookie; },
-      async request(path: string, body?: Record<string, string>, headers: Record<string, string> = {}) {
+      async request(path: string, body?: Record<string, string> | string, headers: Record<string, string> = {}) {
         const response = await fetch(`${baseUrl}${path}`, {
           method: body === undefined ? 'GET' : 'POST',
           headers: { ...(cookie ? { cookie } : {}), ...headers },
-          body: body === undefined ? undefined : new URLSearchParams(body),
+          body: body === undefined ? undefined : typeof body === 'string' ? body : new URLSearchParams(body),
           redirect: 'manual',
           signal: AbortSignal.timeout(5000),
         });
@@ -384,5 +387,96 @@ describe('CSRF HTTP integration', { concurrency: false }, () => {
     assert.equal(response.status, 403, response.body);
     assert.match(response.body, /Admin access required/);
     assert.equal(await database.findUserByUsername(newUser.username), null);
+  });
+
+  describe('framework migration HTTP characterization', () => {
+    it('authenticates JSON credentials with a session-bound CSRF header', async () => {
+      const { client, token } = await anonymous();
+      const response = await client.request('/login', JSON.stringify(credentials), {
+        'content-type': 'application/json', 'x-csrf-token': token,
+      });
+      assert.equal(response.status, 302, response.body);
+      assert.equal(response.headers.get('location'), '/');
+      assert.deepEqual(database.audits, ['login.success']);
+      assert.equal((await client.request('/admin/users')).status, 200);
+    });
+
+    for (const [name, body] of [
+      ['unparsed body', 'unparsed'],
+      ['empty JSON body', ''],
+      ['malformed JSON', '{"username":'],
+    ]) {
+      it(`returns a controlled 400 for ${name} without authentication side effects`, async () => {
+        const { client, token } = await anonymous();
+        const response = await client.request('/login', body, {
+          'content-type': name === 'unparsed body' ? 'text/plain' : 'application/json',
+          'x-csrf-token': token,
+        });
+        assert.equal(response.status, 400, response.body);
+        assert.equal(JSON.parse(response.body).statusCode, 400);
+        assert.doesNotMatch(response.body, /stack|node_modules|TestPassword123/);
+        assert.deepEqual(database.audits, []);
+        assert.equal((await client.request('/')).status, 401);
+      });
+    }
+
+    for (const body of [
+      'username[role]=admin&password=TestPassword123',
+      'username=test-admin&username=other&password=TestPassword123',
+    ]) {
+      it(`rejects non-scalar credential form input: ${body.split('&')[0]}`, async () => {
+        const { client, token } = await anonymous();
+        const response = await client.request('/login', body, {
+          'content-type': 'application/x-www-form-urlencoded', 'x-csrf-token': token,
+        });
+        assert.equal(response.status, 400, response.body);
+        assert.deepEqual(database.audits, []);
+      });
+    }
+
+    it('preserves JSON DTO whitelisting for authenticated administrator submissions', async () => {
+      const { client, token } = await loggedIn();
+      const response = await client.request('/admin/users', JSON.stringify({ ...newUser, unexpected: true }), {
+        'content-type': 'application/json', 'x-csrf-token': token,
+      });
+      assert.equal(response.status, 400, response.body);
+      assert.deepEqual(JSON.parse(response.body).message, ['property unexpected should not exist']);
+      assert.equal(await database.findUserByUsername(newUser.username), null);
+    });
+
+    it('rejects oversized JSON with 413 and continues serving requests', async () => {
+      const { client, token } = await anonymous();
+      const response = await client.request('/login', JSON.stringify({ padding: 'x'.repeat(110000) }), {
+        'content-type': 'application/json', 'x-csrf-token': token,
+      });
+      assert.equal(response.status, 413, response.body);
+      assert.equal(JSON.parse(response.body).statusCode, 413);
+      assert.deepEqual(database.audits, []);
+      assert.equal((await client.request('/login')).status, 200);
+    });
+
+    it('uses scalar query error flags without reflecting input or accepting query credentials', async () => {
+      const { client, token } = await anonymous();
+      const page = await client.request('/login?error=%3Cscript%3Equery-marker%3C%2Fscript%3E');
+      assert.equal(page.status, 200, page.body);
+      assert.match(page.body, /Invalid username or password\./);
+      assert.doesNotMatch(page.body, /query-marker/);
+      const response = await client.request('/login?username=test-admin&password=TestPassword123', { _csrf: token });
+      assert.equal(response.status, 400, response.body);
+      assert.deepEqual(database.audits, []);
+    });
+
+    it('uses exact parameter routes and safely handles rejected async database calls', async () => {
+      const { client } = await loggedIn();
+      assert.equal((await client.request('/files/test%2Dfile')).status, 200);
+      assert.equal((await client.request('/files/test-file/extra')).status, 404);
+      assert.equal((await client.request('/files/nonexistent')).status, 404);
+      database.fileLookupError = new Error('TEST_ONLY_DATABASE_FAILURE');
+      const response = await client.request('/files/test-file');
+      assert.equal(response.status, 500, response.body);
+      assert.deepEqual(JSON.parse(response.body), { statusCode: 500, message: 'Internal server error' });
+      assert.doesNotMatch(response.body, /TEST_ONLY_DATABASE_FAILURE|stack|node_modules/);
+      assert.equal((await client.request('/login')).status, 200);
+    });
   });
 });
