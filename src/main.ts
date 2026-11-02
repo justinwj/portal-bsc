@@ -5,13 +5,13 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import * as session from 'express-session';
 import * as helmet from 'helmet';
 import * as rateLimit from 'express-rate-limit';
-import { existsSync, mkdirSync } from 'fs';
-import { join, resolve } from 'path';
+import { join } from 'path';
 import { createClient } from 'redis';
 import { AppModule } from './app.module';
 import { attachCsrfToken, csrfMiddleware } from './common/csrf';
 import { CouchDbService } from './common/couchdb.service';
 import { configureViews } from './common/views';
+import { FilesService } from './files/files.service';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -109,10 +109,7 @@ async function bootstrap() {
   const couchDbService = app.get(CouchDbService);
   await couchDbService.initialize();
 
-  const rootDir = process.env.NAS_FILES_DIR ?? resolve(process.cwd(), 'data/files');
-  if (!existsSync(rootDir)) {
-    mkdirSync(rootDir, { recursive: true });
-  }
+  await app.get(FilesService).initializeStorage();
 
   await app.listen(port, '0.0.0.0');
   console.log(`Portal-BSC listening on http://0.0.0.0:${port}`);

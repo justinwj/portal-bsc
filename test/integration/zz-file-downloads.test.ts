@@ -109,7 +109,8 @@ describe('real HTTP file authorization and filesystem safety', { concurrency: fa
     for (const name of [role, 'public']) {
       it(`streams authorized ${name} files to ${role} with correct headers, bytes and audit`, async () => {
         const file = metadata.get(name);
-        const before = (await downloadAudits(file._id)).length;
+        const before = await downloadAudits(file._id);
+        const existingIds = new Set(before.map((audit: any) => audit._id));
         await withApp(async (app, http) => {
           const response = await requestFile(app, http, file._id);
           assert.equal(response.status, 200);
@@ -119,12 +120,14 @@ describe('real HTTP file authorization and filesystem safety', { concurrency: fa
           assert.deepEqual(Buffer.from(await response.arrayBuffer()), content);
           // Allow the server's completed-transfer audit write to finish.
           const until = Date.now() + 3000;
-          while ((await downloadAudits(file._id)).length === before && Date.now() < until) {
+          while ((await downloadAudits(file._id)).length === before.length && Date.now() < until) {
             await new Promise((resolve) => setTimeout(resolve, 25));
           }
           const audits = await downloadAudits(file._id);
-          assert.equal(audits.length, before + 1);
-          assert.equal(audits.at(-1).userId, users.get(role).id);
+          assert.equal(audits.length, before.length + 1);
+          const added = audits.filter((audit: any) => !existingIds.has(audit._id));
+          assert.equal(added.length, 1);
+          assert.equal(added[0].userId, users.get(role).id);
         }, role);
       });
     }

@@ -16,7 +16,12 @@ services:
       ALLOW_IN_MEMORY_SESSION_STORE: 'false'
       NAS_FILES_DIR: /var/lib/portal-bsc/files
     volumes:
-      - ${NAS_FILES_HOST_PATH:-./data/files}:/var/lib/portal-bsc/files
+      - type: bind
+        source: ${NAS_FILES_HOST_PATH:?Set NAS_FILES_HOST_PATH to the existing NAS files directory}
+        target: /var/lib/portal-bsc/files
+        read_only: true
+        bind:
+          create_host_path: false
     depends_on:
       redis:
         condition: service_healthy
