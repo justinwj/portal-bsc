@@ -37,5 +37,10 @@ export function csrfMiddleware(req: Request & { session?: any }, _res: Response,
     return next(new ForbiddenException('Invalid or missing CSRF token'));
   }
 
+  // The token is middleware metadata, not a DTO field. Preserve strict DTO validation.
+  if (req.body && typeof req.body === 'object') {
+    delete req.body._csrf;
+  }
+
   return next();
 }
