@@ -1,0 +1,67 @@
+name: Portal-BSC CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - 'codex/**'
+      - 'copilot/**'
+      - 'feature/**'
+      - 'fix/**'
+      - develop
+      - development
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Node 22 tests and dependency integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+      couchdb:
+        image: couchdb:3
+        env:
+          COUCHDB_USER: ci-admin
+          COUCHDB_PASSWORD: ci-only-password-not-for-production
+        ports:
+          - 5984:5984
+        options: >-
+          --health-cmd "curl --fail --silent http://localhost:5984/_up"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Unit and HTTP tests (must execute tests)
+        run: npm test
+      - run: npm run build
+      - name: Real Redis and CouchDB integration (must execute tests)
+        run: npm run test:integration
+        env:
+          INTEGRATION_TESTS: '1'
+          REDIS_URL: redis://127.0.0.1:6379
+          COUCHDB_URL: http://ci-admin:ci-only-password-not-for-production@127.0.0.1:5984
+
+  docker:
+    name: Production Docker build (no publish)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --pull --target runtime --tag portal-bsc:ci .

@@ -10,7 +10,8 @@
     "start:debug": "nest start --debug --watch",
     "seed:admin": "ts-node src/seed-admin.ts",
     "seed:admin:prod": "node dist/seed-admin.js",
-    "test": "node --test --require ts-node/register src/**/*.test.ts"
+    "test": "node scripts/run-tests.cjs",
+    "test:integration": "node scripts/run-tests.cjs integration"
   },
   "repository": {
     "type": "git",
