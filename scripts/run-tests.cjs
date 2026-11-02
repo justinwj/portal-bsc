@@ -2,7 +2,9 @@ const { readdirSync } = require('node:fs');
 const { join } = require('node:path');
 const { spawn } = require('node:child_process');
 
-const integration = process.argv[2] === 'integration';
+const suite = process.argv[2] ?? 'unit';
+if (!['unit', 'integration', 'persistence'].includes(suite)) throw new Error(`Unknown suite: ${suite}`);
+const integration = suite !== 'unit';
 if (integration && process.env.INTEGRATION_TESTS !== '1') {
   throw new Error('Set INTEGRATION_TESTS=1 and test-only REDIS_URL/COUCHDB_URL to run dependency tests');
 }
@@ -14,7 +16,7 @@ function discover(directory) {
   });
 }
 
-const files = discover(integration ? 'test/integration' : 'src').sort();
+const files = discover(suite === 'unit' ? 'src' : `test/${suite}`).sort();
 if (!files.length) throw new Error('No test files discovered');
 const child = spawn(process.execPath, [
   '--test', '--test-concurrency=1', '--test-reporter=tap', '--require', 'ts-node/register', ...files,

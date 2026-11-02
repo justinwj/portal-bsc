@@ -11,7 +11,8 @@
     "seed:admin": "ts-node src/seed-admin.ts",
     "seed:admin:prod": "node dist/seed-admin.js",
     "test": "node scripts/run-tests.cjs",
-    "test:integration": "node scripts/run-tests.cjs integration"
+    "test:integration": "node scripts/run-tests.cjs integration",
+    "test:persistence": "node scripts/run-tests.cjs persistence"
   },
   "repository": {
     "type": "git",

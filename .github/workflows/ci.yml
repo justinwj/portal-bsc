@@ -68,11 +68,20 @@ jobs:
           COUCHDB_URL: http://ci-admin:ci-only-password-not-for-production@127.0.0.1:5984
 
   docker:
-    name: Production Docker build (no publish)
+    name: Production image, Compose persistence, and startup smoke test
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
       - run: docker build --pull --target runtime --tag portal-bsc:ci .
+      - name: Production Compose persistence and container smoke tests
+        run: npm run test:persistence
+        env:
+          INTEGRATION_TESTS: '1'

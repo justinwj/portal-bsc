@@ -28,7 +28,7 @@ export async function unusedPort() {
   return address.port;
 }
 
-export async function launchApplication(redisUrl = dependencyUrl('REDIS_URL')) {
+export async function launchApplication(redisUrl = dependencyUrl('REDIS_URL'), overrides: NodeJS.ProcessEnv = {}) {
   const port = await unusedPort();
   const directory = await mkdtemp(join(tmpdir(), 'portal-bsc-integration-'));
   const child = spawn(process.execPath, ['dist/main.js'], {
@@ -44,6 +44,7 @@ export async function launchApplication(redisUrl = dependencyUrl('REDIS_URL')) {
       ADMIN_USERNAME: 'ci-admin',
       ADMIN_EMAIL: 'ci-admin@example.test',
       ADMIN_PASSWORD: 'TemporaryPassword123',
+      ...overrides,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
