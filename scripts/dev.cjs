@@ -50,6 +50,8 @@ async function stopApplication() {
     try {
       await Promise.race([old.closed, new Promise(resolve => { timer = setTimeout(resolve, 1500); })]);
       if (!old.exited) { await killTree(old.child.pid, 'SIGKILL'); await old.closed; }
+      // Leader exit alone does not prove that every POSIX descendant exited.
+      if (process.platform !== 'win32') await killTree(old.child.pid, 'SIGKILL');
     } finally { clearTimeout(timer); }
     event('stopped', { pid: old.appPid, generation: old.generation });
     if (current === old) current = undefined;
