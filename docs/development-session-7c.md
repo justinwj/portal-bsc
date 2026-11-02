@@ -5,8 +5,9 @@
 - Authorized branch: `codex/portal-bsc-r1-fixes`.
 - Reviewed starting commit: `3b2786507a91c52a79d9198aebdbf877d3de1e4b`.
 - RED tests: `99970c99c538ab136d66f22015bfb0a964de5b0d`.
-- Implementation: `5e51a6c3a7086a172204ceb6e4277901e4bc7d74`.
-- Final verified implementation: `5e51a6c3a7086a172204ceb6e4277901e4bc7d74`. The subsequent report publication commit is identified by the final workflow and handoff; a report cannot contain its own Git object hash.
+- Initial implementation: `5e51a6c3a7086a172204ceb6e4277901e4bc7d74`.
+- Unix termination regression RED: `aec6e5b6d821e1b0eacefd2d1200b7ddaf991b4a`.
+- Final implementation: `bd871e830296a6a508b17870b0994ade3ab229e8`. The subsequent report publication commit is identified by the final workflow and handoff; a report cannot contain its own Git object hash.
 
 Option 2 was explicitly approved. No application business logic, runtime dependency version, authentication, administrator policy, Redis/CouchDB handling, NAS protection, or deployment target was changed. No merge, deployment, image publication, production data access, credential change, or volume deletion was performed.
 
@@ -63,10 +64,13 @@ Tests were committed and executed before replacing the toolchain:
 
 - Initial local tooling RED: **17 executed, 2 passed, 15 failed**, 0 cancelled/skipped. Correct entrypoint/maps and executable Nest decorator metadata checks already passed. Failures demonstrated production test emission, JavaScript emission despite TS2322, lack of a stale-output cleaner, and the missing compilation-aware watch/debug runner.
 - [Independent RED CI](https://github.com/justinwj/portal-bsc/actions/runs/41432644941): completed failure. Existing 82 unit/HTTP and 59 real-service checks passed. Container suite: **10 passed, 1 failed**, 0 cancelled/skipped. Only `ships runtime entrypoints, maps and assets without compiled application tests` failed, listing all nine artifacts. Across that run: **151 passed, 1 failed**.
-- First implementation: original **17 tooling tests passed** locally. Added lifecycle characterizations subsequently expanded this to 22.
+- First implementation: original **17 tooling tests passed** locally. Added lifecycle characterizations subsequently expanded this to 23.
 - One added test initially expected a callback for rewriting byte-identical source. TypeScript correctly avoided rebuilding, so the test timed out (20 passed, 1 failed). It was corrected to change a checking-only compiler option, producing an actual completed compilation with identical output. This is a test assumption correction, not an application defect.
 - An exploratory forced-termination assertion also expected private snapshot deletion after every process was abruptly killed. Processes and ports were released, but the directory could remain. Snapshot deletion is now asserted on normal shutdown; all force-kill process, descendant, port and debugger-pause assertions remain. A hard-killed process cannot guarantee execution of a filesystem cleanup handler. This limitation is explicit rather than concealed as a fixed guarantee.
-- Final local regression: **104 passed**, 0 failed/cancelled/skipped (82 unchanged application tests + 22 tooling tests). Production build and application/test-source type checking exited 0.
+- The first complete [GREEN CI](https://github.com/justinwj/portal-bsc/actions/runs/41437541090) passed 174 distinct tests, with 22 tooling tests independently repeated on Windows (196 executions). The report-only [verification run](https://github.com/justinwj/portal-bsc/actions/runs/41438213614) also passed all three jobs. Final source review then added one stronger Unix termination regression before declaring completion.
+- [Follow-up Unix RED](https://github.com/justinwj/portal-bsc/actions/runs/41438504781): a real application installing a SIGTERM handler survived after the owner exited. Its replacement failed with **EADDRINUSE**. Linux unit/HTTP/tooling: **104 passed, 1 failed**, 0 cancelled/skipped. All 59 real-service, 11 container and 23 Windows tooling checks passed. The Windows-specific forceful termination already handled this scenario correctly; no Windows RED was manufactured.
+- The minimum correction keeps the Unix owner alive until its child is reaped, force-kills a signal-resistant application after a bounded grace period, then clears residual process-group descendants before replacement. The new assertion is unchanged. This was a defect in the new development runner, not an existing Portal business-logic defect.
+- Final local regression: **105 passed**, 0 failed/cancelled/skipped (82 unchanged application tests + 23 tooling tests). Production build and application/test-source type checking exited 0.
 
 Refactoring centralized process-tree termination and added a separate **undebugged** ownership guard, so pausing the application debugger cannot pause parent-death cleanup. Concurrent runtime failure, rebuild and shutdown share one termination promise. Test fixtures stop their owned processes before removing temporary directories. Compiler fixtures use fresh output directories; readiness accounts for independent stdout and ownership IPC pipes. No existing application assertion was removed, skipped, disabled or weakened.
 
@@ -78,7 +82,7 @@ The removed Nest configuration specified only the source root and schematics col
 
 `npm run start:dev` and `start:debug` use TypeScript's compiler watch API. Each full program is checked before emission into a new private snapshot. Only successful, complete output may be launched; the running generation cannot observe partial writes to its own output. On an error the old application stops, no failed generation starts, and a subsequent successful compile recovers automatically.
 
-A serialized coordinator terminates the old process tree before starting the latest complete generation. Identical emitted bytes do not restart. Superseded and deleted files cannot leak through stale snapshots. The owner remains addressable until tree termination, including after application failure on Windows. Unix uses a dedicated process group; Windows uses `taskkill /PID <owned-pid> /T /F`. No global process-name kill is used.
+A serialized coordinator terminates the old process tree before starting the latest complete generation. Identical emitted bytes do not restart. Superseded and deleted files cannot leak through stale snapshots. The owner remains addressable until tree termination, including after application failure on Windows. Unix uses a dedicated process group; its owner reaps the application, with a 750 ms force-termination deadline for a resistant child and a 1.5 s outer owner fallback. Residual group descendants are killed before replacement. Windows uses `taskkill /PID <owned-pid> /T /F`. No global process-name kill is used.
 
 Debug mode adds `--enable-source-maps` and `--inspect=127.0.0.1:9229`; a numeric `--inspect=<port>` selects another predictable loopback port. Public host arguments are rejected. Inspector availability is checked before launch. An undebugged guardian owns the application and reacts to watcher IPC disconnection even when the application is paused. Runtime crashes and startup/compiler errors are reported; errors are not hidden behind a successful build status.
 
@@ -89,7 +93,7 @@ There are **no new dependencies**. The compiler API and Node standard library su
 | Group | Tests and behavior |
 | --- | --- |
 | Production compilation: 6 | Main/bootstrap entrypoints and maps; executable decorator metadata; no test artifacts; nonzero/error with no invalid emission; stale-output cleanup; independent test-source checking |
-| Watch lifecycle: 12 | Initial complete compile; one valid-edit restart; error stops/recovery; initial error/recovery; rapid edits/no overlap; normal descendant/port/snapshot cleanup; forced watcher death cleanup; repeated port reuse; runtime crash/recovery; identical-output no restart; deleted-source removal; interruption cleanup |
+| Watch lifecycle: 13 | Initial complete compile; one valid-edit restart; error stops/recovery; initial error/recovery; rapid edits/no overlap; normal descendant/port/snapshot cleanup; forced watcher death cleanup; repeated port reuse; runtime crash/recovery; identical-output no restart; deleted-source removal; interruption cleanup; signal-resistant application termination before replacement |
 | Debugging: 4 | Live inspector protocol attachment and TypeScript-mapped stacks before/after restart; public address rejection; occupied inspector rejection; forced watcher death while the application is actually debugger-paused |
 | Actual Docker image: 1 | Runtime entrypoints/maps/assets present and application test artifacts absent |
 
@@ -125,22 +129,22 @@ Webpack, schema-utils, schematics, inquirer, external-editor, tmp, deepmerge and
 
 ## Final independent verification
 
-Implementation verification: [GitHub Actions run 41437541090](https://github.com/justinwj/portal-bsc/actions/runs/41437541090), completed **success** at `5e51a6c3a7086a172204ceb6e4277901e4bc7d74`. All three jobs and all verification steps were inspected.
+Final implementation verification: [GitHub Actions run 41439126170](https://github.com/justinwj/portal-bsc/actions/runs/41439126170), completed **success** at `bd871e830296a6a508b17870b0994ade3ab229e8`. All three jobs and all verification steps were inspected. The follow-up Unix RED assertion now passes on Linux and Windows.
 
 | CI job / suite | Passed | Failed | Cancelled | Skipped |
 | --- | ---: | ---: | ---: | ---: |
 | Linux Node 22: unchanged unit/HTTP | 82 | 0 | 0 | 0 |
-| Linux Node 22: compilation/watch/debug contracts | 22 | 0 | 0 | 0 |
+| Linux Node 22: compilation/watch/debug contracts | 23 | 0 | 0 | 0 |
 | Linux Node 22: actual Redis/CouchDB, production HTTP/download and NAS integration | 59 | 0 | 0 | 0 |
 | Linux Docker/Compose: persistence, bootstrap, startup, NAS and image inspection | 11 | 0 | 0 | 0 |
-| Windows Node 22: same compilation/watch/debug contracts repeated | 22 | 0 | 0 | 0 |
-| **Total executed across CI jobs** | **196** | **0** | **0** | **0** |
+| Windows Node 22: same compilation/watch/debug contracts repeated | 23 | 0 | 0 | 0 |
+| **Total executed across CI jobs** | **198** | **0** | **0** | **0** |
 
-There are **174 distinct tests** (104 + 59 + 11); Windows independently repeats the 22 tooling contracts. Both operating systems ran Node **22.23.4**, npm **10.9.9**. Linux and Windows `ci`, type checking, production compilation, full audit and dependency-tree validation passed. The separate production audit/security gate passed with zero findings. No workflow test suite was skipped or replaced.
+There are **175 distinct tests** (105 + 59 + 11); Windows independently repeats the 23 tooling contracts. Both operating systems ran Node **22.23.4**, npm **10.9.9**. Linux and Windows `ci`, type checking, production compilation, full audit and dependency-tree validation passed. The separate production audit/security gate passed with zero findings. No workflow test suite was skipped or replaced.
 
 The production Docker job completed successfully: **11 passed**, 0 failed/cancelled/skipped. It built the runtime image, started the production stack with real services, verified administrator bootstrap and persistence/recreation, enforced the read-only NAS bind, and inspected the actual image: `tests: []`, `entrypoints: true`, `assets: true`. Actual container Node: **22.23.4**, renderer **9.0.4**, glob **14.0.3**, minimatch **11.0.4**. Compose configuration, authenticated startup, first and repeated bootstrap, container recreation with retained data, file downloads, and filesystem protections remain covered by the executed container and integration suites.
 
-Local final `npm test`: **104 passed**, 0 failed/cancelled/skipped. `typecheck`, production build, both npm 10.9.9 audits, `npm ls --all`, and `git diff --check` exited 0. Real Redis/CouchDB and container checks execute in disposable GitHub Actions resources, not locally or against Synology.
+Local final `npm test`: **105 passed**, 0 failed/cancelled/skipped. `typecheck`, production build, both npm 10.9.9 audits, `npm ls --all`, and `git diff --check` exited 0. Real Redis/CouchDB and container checks execute in disposable GitHub Actions resources, not locally or against Synology.
 
 ## Exact session files
 

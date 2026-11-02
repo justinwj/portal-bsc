@@ -18,6 +18,8 @@ Compilation errors stop the old application and launch nothing; correcting them 
 
 The runner prints `[portal-dev]` events for compiling, compiled, compile-error, started, stopped, runtime-exit, startup-error, idle and shutdown. `started` identifies the application PID and its owner PID, not HTTP readiness; the application's listening message indicates readiness. Normal interruption closes the compiler watcher, terminates the owned tree, and removes private snapshots. A separate, undebugged IPC ownership guard terminates the application tree if the watcher disappears, even while the application is paused in a debugger. Unix uses an owned process group; Windows uses taskkill on the owned PID and its tree. No unrelated Node processes are selected or terminated. Never detach application descendants into independently managed services from the development runner.
 
+On Unix the owner stays alive to reap the application after graceful termination. An application that ignores SIGTERM is force-killed after a bounded grace period, and remaining group descendants are terminated before replacement. A resistant application cannot keep the port while the runner starts another generation.
+
 Force-killing the entire tree can prevent every filesystem cleanup handler from running. Processes and ports must still be released; an ignored `tmp/portal-dev-*` directory may remain after such a termination. Prefer normal Ctrl+C or the runner's stop signal. After verifying no development runner is active, leftover private snapshot directories can be removed manually; the runner does not delete another session's directories automatically.
 
 Build output is a generated directory. The production cleaner refuses an external output path or symlinked dist. Runtime views/public handling is unchanged: development uses the repository working directory and Docker copies those assets explicitly.
@@ -32,6 +34,7 @@ Automated tests exercise Windows/Linux compilation, process cleanup, inspector a
    ```powershell
    $env:NODE_ENV = 'development'
    $env:ALLOW_IN_MEMORY_SESSION_STORE = 'true'
+   $env:REDIS_URL = 'redis://127.0.0.1:6379'
    $env:COUCHDB_URL = 'http://127.0.0.1:5984'
    $env:COUCHDB_USER = 'rider-local-test'
    $env:COUCHDB_PASSWORD = 'TemporaryRiderTest123'
