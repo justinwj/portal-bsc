@@ -95,15 +95,15 @@ export class CouchDbService {
 
     try {
       await this.ensureDatabases();
-      this.initialized = true;
     } catch (error: any) {
       if (!allowMemoryFallback) {
         throw new Error(`CouchDB readiness check failed: ${error?.message ?? String(error)}`);
       }
       this.logger.warn(`CouchDB unavailable in local mode: ${error?.message ?? String(error)}`);
       this.db = undefined;
-      this.initialized = true;
     }
+    // Failed persistent initialization must remain retryable, never marked ready.
+    this.initialized = true;
   }
 
   private async ensureDatabases() {

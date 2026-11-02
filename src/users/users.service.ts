@@ -79,20 +79,14 @@ export class UsersService {
     }
     const existing = await this.couchDbService.findUserByUsername(username);
     if (existing) {
-      if (existing.role === UserRole.ADMIN) {
-        if (!existing.isActive) throw new BadRequestException('Existing administrator is disabled; explicit recovery is required');
-        return { ...existing, message: 'admin-already-present' };
+      if (existing.role !== UserRole.ADMIN) {
+        throw new BadRequestException('Bootstrap username collision: existing account is not an administrator and was not modified');
       }
-
-      throw new BadRequestException('Bootstrap username collision: existing account is not an administrator and was not modified');
+      if (!existing.isActive) throw new BadRequestException('Existing administrator is disabled; explicit recovery is required');
+      return { ...existing, message: 'admin-already-present' };
     }
 
-    const created = await this.createUser({
-      username,
-      email,
-      password,
-      role: UserRole.ADMIN,
-    });
+    const created = await this.createUser(dto);
     const verified = await this.couchDbService.findUserById(created._id!);
     if (!verified || verified.username !== username || verified.role !== UserRole.ADMIN || !verified.isActive) {
       throw new Error('Created administrator could not be verified in CouchDB');
