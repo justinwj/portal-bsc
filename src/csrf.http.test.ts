@@ -2,24 +2,31 @@
 import 'reflect-metadata';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import express from 'express';
 import session from 'express-session';
-import { engine } from 'express-handlebars';
-import { CouchDbService, UserRecord } from './common/couchdb.service';
+import { CouchDbService, FileRecord, UserRecord } from './common/couchdb.service';
 import { attachCsrfToken, csrfMiddleware } from './common/csrf';
-import { UserRole } from './common/roles';
+import { SessionUser, UserRole } from './common/roles';
+import { configureViews } from './common/views';
 import { UsersService } from './users/users.service';
+
+type StoredSession = session.SessionData & { user?: SessionUser; csrfToken?: string };
 
 // Only the external database adapter is replaced. The AppModule's controllers,
 // services (including bcrypt), guards, and HTTP middleware all run normally.
 class TemporaryCouchStore {
   readonly users = new Map<string, UserRecord>();
   readonly audits: string[] = [];
+  readonly file: FileRecord = {
+    _id: 'test-file', type: 'file', title: 'Test document', description: 'HTTP view fixture',
+    storedFilename: 'test.pdf', originalFilename: 'test.pdf', mimeType: 'application/pdf',
+    sizeBytes: 1, sha256: 'test', category: 'docs', visibility: 'public', allowedRoles: [],
+    uploadedByUserId: 'fixture', createdAt: '', updatedAt: '',
+  };
 
   async createUser(user: Omit<UserRecord, '_id' | 'createdAt' | 'updatedAt'>) {
     const now = new Date().toISOString();
@@ -38,6 +45,14 @@ class TemporaryCouchStore {
 
   async listUsers() {
     return [...this.users.values()];
+  }
+
+  async listFiles() {
+    return [this.file];
+  }
+
+  async findFileById(id: string) {
+    return id === this.file._id ? this.file : null;
   }
 
   async logAudit(event: string) {
@@ -89,14 +104,7 @@ describe('CSRF HTTP integration', { concurrency: false }, () => {
     app.use(express.urlencoded({ extended: false }));
     app.use(attachCsrfToken);
     app.use(csrfMiddleware);
-    app.setBaseViewsDir(join(process.cwd(), 'views'));
-    app.engine('hbs', engine({
-      extname: '.hbs',
-      defaultLayout: 'main',
-      layoutsDir: join(process.cwd(), 'views/layouts'),
-      partialsDir: join(process.cwd(), 'views/partials'),
-    }));
-    app.setViewEngine('hbs');
+    configureViews(app);
     app.useGlobalPipes(new ValidationPipe({
       whitelist: true,
       transform: true,
@@ -172,6 +180,99 @@ describe('CSRF HTTP integration', { concurrency: false }, () => {
     // Login regenerates the session. Fetch the new session's token over HTTP.
     return { client, token: await getToken(client) };
   }
+
+  function storedSessions() {
+    return new Promise<Record<string, StoredSession>>((resolve, reject) => {
+      sessionStore.all((error, sessions) => error ? reject(error) : resolve(sessions as Record<string, StoredSession>));
+    });
+  }
+
+  function logoutToken(html: string) {
+    const form = /<form\b[^>]*action="\/logout"[^>]*>([\s\S]*?)<\/form>/.exec(html)?.[1];
+    assert.ok(form, 'The page must render the logout form');
+    const token = /name="_csrf" value="([^"]*)"/.exec(form)?.[1];
+    assert.match(token ?? '', /^[a-f0-9]{64}$/, 'The logout form must contain a nonempty CSRF token');
+    return token!;
+  }
+
+  describe('authenticated rendering and logout', () => {
+    for (const role of [UserRole.ADMIN, UserRole.MEMBER]) {
+      const paths = ['/', '/files', '/files/test-file', ...(role === UserRole.ADMIN ? ['/admin/users'] : [])];
+
+      it(`renders the ${role} dashboard with role-specific navigation`, async () => {
+        const { client } = await loggedIn(role);
+        const response = await client.request('/');
+        assert.equal(response.status, 200, response.body);
+        assert.match(response.body, new RegExp(`Welcome, test-${role}`));
+        assert.match(response.body, /href="\/">Dashboard<\/a>/);
+        assert.match(response.body, /href="\/files">Files<\/a>/);
+        if (role === UserRole.ADMIN) {
+          assert.match(response.body, /href="\/admin\/users">Users<\/a>/);
+          assert.match(response.body, /href="\/admin\/users">Manage users<\/a>/);
+        } else {
+          assert.doesNotMatch(response.body, /href="\/admin\/users"/);
+          const forbidden = await client.request('/admin/users');
+          assert.equal(forbidden.status, 403, forbidden.body);
+        }
+      });
+
+      for (const path of paths) {
+        it(`provides a working logout CSRF token on ${role} ${path}`, async () => {
+          const { client, token } = await loggedIn(role);
+          const page = await client.request(path);
+          assert.equal(page.status, 200, page.body);
+          const renderedToken = logoutToken(page.body);
+          assert.equal(renderedToken, token, 'The rendered token must belong to the authenticated session');
+          const response = await client.request('/logout', { _csrf: renderedToken });
+          assert.equal(response.status, 302, response.body);
+          assert.equal(response.headers.get('location'), '/login');
+        });
+      }
+
+      it(`destroys the ${role} session and rejects the old cookie on protected routes`, async () => {
+        const { client, token } = await loggedIn(role);
+        const oldCookie = client.cookie;
+        const sessionsBefore = await storedSessions();
+        assert.equal(Object.keys(sessionsBefore).length, 1);
+        const [sessionId, authenticatedSession] = Object.entries(sessionsBefore)[0];
+        assert.equal(authenticatedSession.user?.role, role);
+
+        const response = await client.request('/logout', { _csrf: token });
+        assert.equal(response.status, 302, response.body);
+        assert.equal(response.headers.get('location'), '/login');
+        assert.match(response.headers.get('set-cookie') ?? '', /connect\.sid=;/);
+        assert.match(response.headers.get('set-cookie') ?? '', /Expires=Thu, 01 Jan 1970/i);
+        assert.equal((await storedSessions())[sessionId], undefined, 'Logout must delete the stored session');
+
+        for (const path of paths) {
+          const replay = await client.request(path, undefined, { cookie: oldCookie });
+          assert.equal(replay.status, 401, `${path}: ${replay.body}`);
+          assert.match(replay.body, /Authentication required/);
+        }
+        const staleToken = await client.request('/logout', { _csrf: token }, { cookie: oldCookie });
+        assert.equal(staleToken.status, 403, staleToken.body);
+      });
+
+      for (const tokenCase of ['missing', 'invalid', 'another session'] as const) {
+        it(`rejects ${tokenCase} logout CSRF for ${role} without destroying the session`, async () => {
+          const { client, token } = await loggedIn(role);
+          const oldCookie = client.cookie;
+          const sessionsBefore = await storedSessions();
+          const [sessionId, authenticatedSession] = Object.entries(sessionsBefore)[0];
+          const body = tokenCase === 'missing' ? {}
+            : { _csrf: tokenCase === 'invalid' ? `${token}-invalid` : await getToken(browser()) };
+          const response = await client.request('/logout', body);
+          assert.equal(response.status, 403, response.body);
+          assert.match(response.body, /Invalid or missing CSRF token/);
+          assert.equal(client.cookie, oldCookie);
+          const sessionAfter = (await storedSessions())[sessionId];
+          assert.ok(sessionAfter, 'A rejected logout must leave the authenticated session intact');
+          assert.deepEqual(sessionAfter.user, authenticatedSession.user);
+          assert.equal(sessionAfter.csrfToken, token);
+        });
+      }
+    }
+  });
 
   it('accepts valid login form submissions and persists a regenerated admin session', async () => {
     const client = browser();

@@ -5,13 +5,13 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import * as session from 'express-session';
 import * as helmet from 'helmet';
 import * as rateLimit from 'express-rate-limit';
-import { engine } from 'express-handlebars';
 import { existsSync, mkdirSync } from 'fs';
 import { join, resolve } from 'path';
 import { createClient } from 'redis';
 import { AppModule } from './app.module';
 import { attachCsrfToken, csrfMiddleware } from './common/csrf';
 import { CouchDbService } from './common/couchdb.service';
+import { configureViews } from './common/views';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -82,14 +82,7 @@ async function bootstrap() {
   });
 
   app.useStaticAssets(join(process.cwd(), 'public'));
-  app.setBaseViewsDir(join(process.cwd(), 'views'));
-  app.engine('hbs', engine({
-    extname: '.hbs',
-    defaultLayout: 'main',
-    layoutsDir: join(process.cwd(), 'views/layouts'),
-    partialsDir: join(process.cwd(), 'views/partials'),
-  }));
-  app.setViewEngine('hbs');
+  configureViews(app);
 
   app.useGlobalPipes(
     new ValidationPipe({

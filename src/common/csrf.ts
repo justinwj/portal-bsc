@@ -6,13 +6,14 @@ export function createCsrfToken(): string {
   return randomBytes(32).toString('hex');
 }
 
-export function attachCsrfToken(req: Request & { session?: any; csrfToken?: () => string }, _res: Response, next: NextFunction) {
+export function attachCsrfToken(req: Request & { session?: any; csrfToken?: () => string }, res: Response, next: NextFunction) {
   if (!req.session) {
     return next();
   }
 
   req.session.csrfToken ??= createCsrfToken();
   req.csrfToken = () => req.session.csrfToken;
+  res.locals.csrfToken = req.session.csrfToken;
   return next();
 }
 

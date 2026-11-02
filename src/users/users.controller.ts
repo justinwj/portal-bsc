@@ -16,7 +16,7 @@ export class UsersController {
       throw new ForbiddenException('Admin access required');
     }
     const users = await this.usersService.listUsers();
-    return res.render('admin-users', { title: 'User management', users, user: req.session.user, csrfToken: req.csrfToken() });
+    return res.render('admin-users', { title: 'User management', users, user: req.session.user });
   }
 
   @Post('users')

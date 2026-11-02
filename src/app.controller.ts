@@ -21,7 +21,7 @@ export class AppController {
   @Get('/files')
   async filesPage(@Req() req: Request & { session?: any }, @Res() res: Response) {
     const files = await this.filesService.listFilesForUser(req.session.user);
-    return res.render('files', { title: 'Files', user: req.session.user, files, csrfToken: req.csrfToken() });
+    return res.render('files', { title: 'Files', user: req.session.user, files });
   }
 
   @Get('/files/:id')
@@ -31,6 +31,6 @@ export class AppController {
       throw new NotFoundException('File not found');
     }
     const visible = await this.filesService.getFileForDownload(id, req.session.user);
-    return res.render('file-detail', { title: file.title, file: visible, user: req.session.user, csrfToken: req.csrfToken() });
+    return res.render('file-detail', { title: file.title, file: visible, user: req.session.user });
   }
 }

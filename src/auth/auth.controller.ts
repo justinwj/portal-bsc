@@ -17,7 +17,6 @@ export class AuthController {
     return res.render('login', {
       title: 'Login',
       error: req.query.error ?? null,
-      csrfToken: req.csrfToken(),
     });
   }
 
