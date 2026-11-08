@@ -83,4 +83,26 @@ describe('real CouchDB/Redis production account-management HTTP', { concurrency:
       .filter((d: any) => d.details?.targetUserId === otherId);
     assert.equal(events.length, 2);
   });
+  it('reports a real CouchDB audit rejection after the account commit without claiming atomicity', async () => {
+    const actor = await login(); const audit = client.use('portal_audit');
+    const id = `_design/ci-account-audit-denial-${randomUUID()}`;
+    // Real CouchDB validation rejects only this test's unique target. No audit
+    // records, user records, databases or volumes are removed for fault injection.
+    const design = await audit.insert({ _id: id, language: 'javascript',
+      validate_doc_update: `function(doc) { if (doc.event === 'user.disabled' && doc.details && doc.details.targetUserId === ${JSON.stringify(memberId)}) throw({forbidden: 'private-disposable-audit-denial'}); }` });
+    try {
+      const response = await change(actor, memberId, false);
+      assert.equal(response.status, 503, response.body);
+      assert.match(response.body, /status changed.*audit/s);
+      assert.doesNotMatch(response.body, /private-disposable-audit-denial/);
+      assert.equal((await client.use('portal_users').get(memberId)).isActive, false);
+      const events = (await audit.list({include_docs:true})).rows.map((r: any) => r.doc)
+        .filter((d: any) => d.details?.targetUserId === memberId);
+      assert.equal(events.length, 0);
+      assert.equal((await actor.http.request('/admin/users')).status, 200);
+    } finally {
+      // Remove only the test-owned validation fixture, not application data.
+      await audit.destroy(id, design.rev);
+    }
+  });
 });

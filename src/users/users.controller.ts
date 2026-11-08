@@ -3,7 +3,6 @@ import { Request, Response } from 'express';
 import { AccountStatusDto, CreateUserDto } from '../common/dto/common.dto';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { AuthGuard } from '../common/guards/auth.guard';
-import { UserRole } from '../common/roles';
 import { UsersService } from './users.service';
 
 @Controller('admin')
@@ -13,18 +12,19 @@ export class UsersController {
 
   @Get('users')
   async usersPage(@Req() req: Request & { session?: any }, @Res() res: Response) {
-    const notices = { enabled: 'Account enabled. The user must sign in again.', disabled: 'Account disabled. Existing sessions can no longer access protected pages.', unchanged: 'Account status was already set; no change was made.' };
-    return this.renderUsers(req, res, { notice: notices[String(req.query.notice)] });
+    const notices = new Map([
+      ['enabled', 'Account enabled. The user must sign in again.'],
+      ['disabled', 'Account disabled. Existing sessions can no longer access protected pages.'],
+      ['unchanged', 'Account status was already set; no change was made.'],
+    ]);
+    return this.renderUsers(req, res, { notice: notices.get(String(req.query.notice)) });
   }
 
   private async renderUsers(req: Request & { session?: any }, res: Response, feedback: { notice?: string; error?: string } = {}) {
-    const users = await this.usersService.listUsers();
-    const activeAdmins = users.filter(u => u.isActive && u.role === UserRole.ADMIN).length;
-    return res.render('admin-users', { title: 'User management', user: req.session.user, ...feedback,
-      users: users.map(u => ({ _id: u._id, username: u.username, email: u.email, role: u.role, isActive: u.isActive,
-        isSelf: u._id === req.session.user.id,
-        isLastActiveAdmin: u.isActive && u.role === UserRole.ADMIN && activeAdmins === 1,
-        canDisable: u.isActive && u._id !== req.session.user.id && (u.role !== UserRole.ADMIN || activeAdmins > 1) })) });
+    // Revalidate before rendering even on a rejected operation. A concurrent
+    // disable must not return administration data in its rejection page.
+    const users = await this.usersService.managementUsers(req.session.user.id);
+    return res.render('admin-users', { title: 'User management', user: req.session.user, users, ...feedback });
   }
 
   @Post('users')

@@ -21,8 +21,9 @@ class AccountStore {
   audits: any[] = [];
   failAudit = false;
   failSave = false;
+  afterRead?: (id: string) => void;
   async listUsers() { return structuredClone([...this.users.values()]); }
-  async findUserById(id: string) { return structuredClone(this.users.get(id) ?? null); }
+  async findUserById(id: string) { const user = structuredClone(this.users.get(id) ?? null); this.afterRead?.(id); return user; }
   async findUserByUsername(name: string) { return (await this.listUsers()).find(u => u.username === name) ?? null; }
   async saveUser(user: UserRecord) {
     if (this.failSave) throw Error('private-database-details');
@@ -78,7 +79,7 @@ describe('account-management safety over real Nest HTTP', { concurrency: false }
     await app.listen(0, '127.0.0.1'); url = await app.getUrl(); users = app.get(UsersService);
   });
   beforeEach(async () => {
-    store.users.clear(); store.audits = []; store.failAudit = false; store.failSave = false;
+    store.users.clear(); store.audits = []; store.failAudit = false; store.failSave = false; store.afterRead = undefined;
     await new Promise<void>((resolve, reject) => sessions.clear(e => e ? reject(e) : resolve()));
     fixture('admin-a', UserRole.ADMIN); fixture('admin-b', UserRole.ADMIN); fixture('member', UserRole.MEMBER);
   });
@@ -251,5 +252,17 @@ describe('account-management safety over real Nest HTTP', { concurrency: false }
     const result = await change(actor, 'member', false); assert.equal(result.status, 503);
     assert.deepEqual(store.users.get('member'), original); assert.equal(store.audits.filter(a => a.event.startsWith('user.')).length, 0);
     assert.doesNotMatch(result.body, /private-database-details/);
+  });
+  it('does not disclose the administration page when the actor is disabled after guard validation', async () => {
+    const actor = await login();
+    store.afterRead = id => {
+      if (id === 'admin-a') { store.afterRead = undefined; store.users.get(id)!.isActive = false; }
+    };
+    // Simulate an external status transition between the guard's detached read
+    // and the service's fresh actor validation. No application guard is mocked.
+    const result = await change(actor, 'member', false);
+    assert.equal(result.status, 403);
+    assert.doesNotMatch(result.body, /<h1>User management|<table|member@example\.test/);
+    assert.equal(store.users.get('member')!.isActive, true);
   });
 });
