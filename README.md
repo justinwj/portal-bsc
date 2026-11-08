@@ -64,6 +64,8 @@ The development runner launches only complete, error-free builds, stops on compi
 - `nginx/portal.conf` shows an example upstream service target of `http://app:3000` for Dockerized deployments.
 
 ## Admin bootstrap
+For disabling and reactivating accounts, administrator lockout prevention, session revocation, audit failures, and the single-instance concurrency boundary, see [Administrator account safety](docs/administrator-accounts.md).
+
 Run:
 `npm run seed:admin`
 
