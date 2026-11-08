@@ -10,4 +10,5 @@ export interface SessionUser {
   username: string;
   email: string;
   role: RoleName;
+  sessionVersion?: number;
 }

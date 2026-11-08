@@ -27,6 +27,7 @@ export class AuthService {
       username: user.username,
       email: user.email,
       role: user.role ?? UserRole.MEMBER,
+      sessionVersion: user.sessionVersion ?? 0,
     };
   }
 }

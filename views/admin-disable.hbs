@@ -1,0 +1,11 @@
+<section class="card" aria-labelledby="disable-title">
+  <h1 id="disable-title">Confirm account disable</h1>
+  <p>Disable <strong>{{target.username}}</strong>?</p>
+  <p>Disabling this user immediately prevents further authenticated access. Existing sessions cannot be reused after reactivation; the user must sign in again.</p>
+  <form method="POST" action="/admin/users/{{target._id}}/disable">
+    <input type="hidden" name="_csrf" value="{{csrfToken}}" />
+    <input type="hidden" name="confirmed" value="yes" />
+    <button type="submit">Confirm disable</button>
+    <a href="/admin/users">Cancel</a>
+  </form>
+</section>

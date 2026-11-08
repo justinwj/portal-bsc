@@ -127,6 +127,14 @@ describe('account-management safety over real Nest HTTP', { concurrency: false }
     assert.equal(results.filter(r => r.status === 'fulfilled').length, 1);
     assert.equal([...store.users.values()].filter(u => u.role === UserRole.ADMIN && u.isActive).length, 1);
   });
+  it('validates the status value in the service and never persists a non-boolean status', async () => {
+    await assert.rejects((users.setUserActive as any)('member', 'false', 'admin-a'), (e: any) => e.getStatus?.() === 400);
+    assert.equal(store.users.get('member')!.isActive, true);
+  });
+  it('serializes duplicate status changes without duplicate successful audit events', async () => {
+    await Promise.all([(users.setUserActive as any)('member', false, 'admin-a'), (users.setUserActive as any)('member', false, 'admin-a')]);
+    assert.equal(store.audits.filter(a => a.event === 'user.disabled').length, 1);
+  });
   it('rejects one of two concurrent conflicting HTTP requests and retains one active administrator', async () => {
     const a = await login(), b = await login('admin-b');
     const responses = await Promise.all([change(a, 'admin-b', false), change(b, 'admin-a', false)]);
@@ -205,6 +213,21 @@ describe('account-management safety over real Nest HTTP', { concurrency: false }
     assert.equal((await change(actor, 'member', true)).status, 302);
     for (const cookie of [oldObserved, oldUnobserved]) assert.equal((await observed.client.request('/', undefined, cookie)).status, 401);
     assert.equal((await (await login('member')).client.request('/')).status, 200);
+  });
+  it('already destroys a session observed while disabled and does not restore that destroyed session', async () => {
+    const actor = await login(), member = await login('member'); const cookie = member.client.cookie;
+    assert.equal((await change(actor, 'member', false)).status, 302);
+    assert.equal((await member.client.request('/', undefined, cookie)).status, 401);
+    // Restore only this disposable fixture to characterize the existing guard,
+    // independently of the missing Enable route.
+    store.users.get('member')!.isActive = true;
+    assert.equal((await member.client.request('/', undefined, cookie)).status, 401);
+  });
+  it('rejects an unobserved old cookie after fixture reactivation independently of the Enable route', async () => {
+    const actor = await login(), member = await login('member'); const cookie = member.client.cookie;
+    assert.equal((await change(actor, 'member', false)).status, 302);
+    store.users.get('member')!.isActive = true;
+    assert.equal((await member.client.request('/', undefined, cookie)).status, 401);
   });
   it('records actor, target, statuses, timestamp and request context without credentials', async () => {
     const actor = await login(); await change(actor, 'member', false); await change(actor, 'member', true);

@@ -1,4 +1,4 @@
-import { IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString, Matches, MinLength } from 'class-validator';
+import { Equals, IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString, Matches, MinLength } from 'class-validator';
 import { UserRole } from '../roles';
 
 export class LoginDto {
@@ -45,4 +45,10 @@ export class UpdateUserDto {
 
   @IsOptional()
   isActive?: boolean;
+}
+
+export class AccountStatusDto {
+  @IsOptional()
+  @Equals('yes', { message: 'Confirmation must be yes' })
+  confirmed?: string;
 }

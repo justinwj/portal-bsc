@@ -15,11 +15,11 @@ export class AuthGuard implements CanActivate {
     }
 
     const user = await this.usersService.findById(sessionUser.id);
-    if (!user || !user.isActive) {
+    if (!user || !user.isActive || (user.sessionVersion ?? 0) !== (sessionUser.sessionVersion ?? 0)) {
       if (req.session) {
         req.session.destroy(() => undefined);
       }
-      throw new UnauthorizedException('Account is disabled or unavailable');
+      throw new UnauthorizedException('Account is disabled, unavailable, or requires a new login');
     }
 
     req.session.user = {
@@ -27,6 +27,7 @@ export class AuthGuard implements CanActivate {
       username: user.username,
       email: user.email,
       role: user.role,
+      sessionVersion: user.sessionVersion ?? 0,
     };
 
     return true;

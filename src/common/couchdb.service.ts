@@ -13,6 +13,8 @@ export interface UserRecord {
   passwordHash: string;
   role: UserRole;
   isActive: boolean;
+  // Legacy records/sessions use version zero. Disabling revokes all old cookies.
+  sessionVersion?: number;
   createdAt: string;
   updatedAt: string;
 }

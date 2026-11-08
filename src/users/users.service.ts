@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
@@ -8,6 +8,10 @@ import { UserRole } from '../common/roles';
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+  // Nest provides one UsersService per application. Serialize the entire status
+  // transaction, including fresh actor validation, across all target accounts.
+  private statusQueue: Promise<void> = Promise.resolve();
   constructor(private readonly couchDbService: CouchDbService) {}
 
   async createUser(dto: CreateUserDto): Promise<UserRecord> {
@@ -41,15 +45,51 @@ export class UsersService {
     return this.couchDbService.findUserById(id);
   }
 
-  async setUserActive(userId: string, isActive: boolean) {
+  private async statusChange(userId: string, isActive: boolean, actingAdminId?: string) {
+    if (typeof isActive !== 'boolean') throw new BadRequestException('Account status must be a boolean');
+    const actor = actingAdminId ? await this.findById(actingAdminId) : null;
+    if (!actor?.isActive || actor.role !== UserRole.ADMIN) throw new ForbiddenException('An active administrator is required');
     const user = await this.couchDbService.findUserById(userId);
-    if (!user) {
-      throw new NotFoundException('User not found');
+    if (!user) throw new NotFoundException('User not found');
+    if (!isActive && userId === actor._id) throw new ForbiddenException('You cannot disable your own account');
+    if (!isActive && user.isActive && user.role === UserRole.ADMIN) {
+      const activeAdmins = (await this.listUsers()).filter(u => u.isActive && u.role === UserRole.ADMIN);
+      if (activeAdmins.length <= 1) throw new ConflictException('The last active administrator cannot be disabled');
     }
-    user.isActive = isActive;
-    user.updatedAt = new Date().toISOString();
-    const updated = await this.couchDbService.saveUser(user);
-    return updated;
+    return { actor, user };
+  }
+
+  async previewDisable(userId: string, actingAdminId: string) {
+    return (await this.statusChange(userId, false, actingAdminId)).user;
+  }
+
+  async setUserActive(userId: string, isActive: boolean, actingAdminId?: string, context: { ip?: string; userAgent?: string } = {}) {
+    const previous = this.statusQueue;
+    let release: () => void;
+    this.statusQueue = new Promise<void>(resolve => { release = resolve; });
+    await previous;
+    try {
+      // Guard checks are insufficient: a competing request may disable this
+      // actor after its guard ran but before it obtains the status lock.
+      const { actor, user } = await this.statusChange(userId, isActive, actingAdminId);
+      if (user.isActive === isActive) return { user, changed: false };
+      const next = { ...user, isActive, updatedAt: new Date().toISOString(),
+        sessionVersion: (user.sessionVersion ?? 0) + (isActive ? 0 : 1) };
+      let saved: UserRecord;
+      try { saved = await this.couchDbService.saveUser(next); }
+      catch { throw new ServiceUnavailableException('Unable to save the account status. Please try again when storage is available.'); }
+      try {
+        await this.couchDbService.logAudit(isActive ? 'user.enabled' : 'user.disabled', {
+          targetUserId: saved._id, targetUsername: saved.username,
+          previousStatus: user.isActive ? 'active' : 'disabled', newStatus: isActive ? 'active' : 'disabled',
+          userAgent: context.userAgent?.slice(0, 256),
+        }, actor._id, actor.username, context.ip);
+      } catch {
+        this.logger.error('Account status saved but account-status audit persistence failed');
+        throw new ServiceUnavailableException('Account status changed, but its audit record could not be saved. Contact an operator; repeating the action will not recreate the missing audit record.');
+      }
+      return { user: saved, changed: true };
+    } finally { release!(); }
   }
 
   async promoteToAdmin(userId: string) {

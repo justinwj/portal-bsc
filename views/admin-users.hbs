@@ -1,6 +1,9 @@
 <section class="page-header">
   <h1>User management</h1>
+  <p>Signed in as <strong>{{user.username}}</strong> (administrator).</p>
 </section>
+{{#if notice}}<p role="status">{{notice}}</p>{{/if}}
+{{#if error}}<p role="alert">{{error}}</p>{{/if}}
 <div class="grid two-col">
   <div class="card">
     <h2>Create user</h2>
@@ -29,12 +32,17 @@
           <td>{{this.role}}</td>
           <td>{{#if this.isActive}}Active{{else}}Disabled{{/if}}</td>
           <td>
-            {{#if this.isActive}}
-              <form method="POST" action="/admin/users/{{this._id}}/disable">
-                <input type="hidden" name="_csrf" value="{{../csrfToken}}" />
-                <button type="submit">Disable</button>
-              </form>
+            {{#if this.isSelf}}<span>Current account. Self-disable is prohibited.</span>{{/if}}
+            {{#if this.isLastActiveAdmin}}<span>Protected: last active administrator.</span>{{/if}}
+            {{#if this.canDisable}}
+              <a href="/admin/users/{{this._id}}/disable" aria-label="Review disabling {{this.username}}">Disable</a>
             {{/if}}
+            {{#unless this.isActive}}
+              <form method="POST" action="/admin/users/{{this._id}}/enable">
+                <input type="hidden" name="_csrf" value="{{../csrfToken}}" />
+                <button type="submit" aria-label="Enable {{this.username}}">Enable</button>
+              </form>
+            {{/unless}}
           </td>
         </tr>
         {{/each}}

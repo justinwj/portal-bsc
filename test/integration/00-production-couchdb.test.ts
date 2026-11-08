@@ -176,7 +176,8 @@ describe('production CouchDB authentication and administrator bootstrap', { conc
     const users = new UsersService(service);
     const username = `disabled-${randomUUID()}`;
     const created = await users.createUser({ ...admin, username, role: UserRole.ADMIN });
-    await users.setUserActive(created._id, false);
+    // Bootstrap fixture, not an unauthorized ordinary account-management call.
+    await service.saveUser({ ...created, isActive: false });
     const before = await storedUser(username);
     const result = await seed({ ADMIN_USERNAME: username });
     assert.notEqual(result.code, 0, result.output);
