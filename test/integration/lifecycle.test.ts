@@ -70,4 +70,10 @@ describe('real CouchDB/Redis registration and account-deletion lifecycle',{concu
     const user=await register(),admin=await login();const r=await Promise.all([post(admin,decide(user._id,'approve')),post(admin,decide(user._id,'reject'))]);
     assert.deepEqual(r.map(x=>x.status).sort(),[303,409]);assert.equal((await audits(user._id)).filter(e=>['registration.approved','registration.rejected'].includes(e.event)).length,1);
   });
+  it('registers successfully when the user database contains real CouchDB index metadata',async()=>{
+    const users=db.use('portal_users'),id=`_design/ci-lifecycle-${randomUUID()}`;
+    const design=await users.insert({_id:id,language:'javascript',views:{}});
+    try { assert.equal((await register()).registration.status,'pending'); }
+    finally { await users.destroy(id,design.rev); } // Only this test-owned design fixture.
+  });
 });

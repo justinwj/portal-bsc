@@ -94,6 +94,11 @@ describe('registration and deletion lifecycle over real Nest HTTP', {concurrency
     const duplicate=await a.client.request('/register',{...registration,username:'another-name',_csrf:a.csrf});assert.equal(duplicate.status,303);
     assert.equal(store.users.size,4);assert.equal(store.audits.filter(e=>e.event==='registration.requested').length,1);
   });
+  it('ignores database design metadata when checking public registration identities',async()=>{
+    store.users.set('_design/test-index',{_id:'_design/test-index',language:'javascript',views:{}});
+    const a=await anonymous();assert.equal((await a.client.request('/register',{...registration,_csrf:a.csrf})).status,303);
+    assert.ok(await store.findUserByUsername(registration.username));
+  });
   it('limits public registration across fresh sessions without affecting login availability',async()=>{
     for(let i=0;i<5;i++){const a=await anonymous();assert.equal((await a.client.request('/register',{...registration,_csrf:a.csrf})).status,303);}
     const a=await anonymous();const limited=await a.client.request('/register',{...registration,_csrf:a.csrf});assert.equal(limited.status,429);assert.ok(limited.headers.get('retry-after'));

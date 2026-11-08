@@ -66,7 +66,11 @@
         <tr>
           <td>{{this.username}}</td>
           <td>{{this.role}}</td>
-          <td>{{accountStatus}}{{#if registration}}<br />Registration requested: <time>{{registration.requestedAt}}</time>{{#if registration.decidedAt}}<br />Decision: <time>{{registration.decidedAt}}</time>{{/if}}{{/if}}</td>
+          <td>
+            {{accountStatus}}
+            {{#if registration}}<br />Registration requested: <time>{{registration.requestedAt}}</time>{{#if registration.decidedAt}}<br />Decision: <time>{{registration.decidedAt}}</time>{{/if}}{{/if}}
+            {{#if deletionRequest}}<br />Deletion request: {{deletionRequest.status}}, <time>{{deletionRequest.requestedAt}}</time>{{#if deletionRequest.decidedAt}}<br />Decision: <time>{{deletionRequest.decidedAt}}</time>{{/if}}{{/if}}
+          </td>
           <td>
             {{#if this.isSelf}}<span>Current account. Self-disable is prohibited.</span>{{/if}}
             {{#if this.isLastActiveAdmin}}<span>Protected: last active administrator.</span>{{/if}}

@@ -13,15 +13,15 @@ export interface AccountRequestContext { ip?: string; userAgent?: string }
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
-  // Nest provides one UsersService per application. Serialize the entire status
-  // transaction, including fresh actor validation, across all target accounts.
-  private statusQueue: Promise<void> = Promise.resolve();
+  // One Nest singleton serializes identity reservation, workflow decisions and
+  // status changes, including fresh actor validation across all target accounts.
+  private mutationQueue: Promise<void> = Promise.resolve();
   constructor(private readonly couchDbService: CouchDbService) {}
 
   private async exclusive<T>(operation: () => Promise<T>): Promise<T> {
-    const previous = this.statusQueue;
+    const previous = this.mutationQueue;
     let release: () => void;
-    this.statusQueue = new Promise<void>(resolve => { release = resolve; });
+    this.mutationQueue = new Promise<void>(resolve => { release = resolve; });
     await previous;
     try { return await operation(); } finally { release!(); }
   }
@@ -50,7 +50,8 @@ export class UsersService {
   }
 
   async listUsers() {
-    return this.couchDbService.listUsers();
+    // CouchDB's _all_docs also includes design/index documents, not accounts.
+    return (await this.couchDbService.listUsers()).filter(user => user?.type === 'user');
   }
 
   async findByUsername(username: string) {
@@ -114,11 +115,8 @@ export class UsersService {
       try { saved = await this.couchDbService.saveUser(next); }
       catch { throw new ServiceUnavailableException('Unable to save the account status. Please try again when storage is available.'); }
       try {
-        await this.couchDbService.logAudit(isActive ? 'user.enabled' : 'user.disabled', {
-          targetUserId: saved._id, targetUsername: saved.username,
-          previousStatus: user.isActive ? 'active' : 'disabled', newStatus: isActive ? 'active' : 'disabled',
-          userAgent: context.userAgent?.slice(0, 256),
-        }, actor._id, actor.username, context.ip);
+        await this.workflowAudit(isActive ? 'user.enabled' : 'user.disabled', saved, actor,
+          user.isActive ? 'active' : 'disabled', isActive ? 'active' : 'disabled', context);
       } catch {
         this.logger.error('Account status saved but account-status audit persistence failed');
         throw new ServiceUnavailableException('Account status changed, but its audit record could not be saved. Contact an operator; repeating the action will not recreate the missing audit record.');
@@ -152,9 +150,9 @@ export class UsersService {
     });
   }
 
-  private validateDecision(decision: string) {
+  private validateDecision(decision: string): 'approved' | 'rejected' {
     if (decision !== 'approve' && decision !== 'reject') throw new BadRequestException('Decision must be approve or reject');
-    return decision === 'approve' ? 'approved' as const : 'rejected' as const;
+    return decision === 'approve' ? 'approved' : 'rejected';
   }
 
   private async requireAccount(userId: string) {
