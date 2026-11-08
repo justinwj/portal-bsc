@@ -1,0 +1,10 @@
+<section class="card">
+  <h1>Account audit history: {{account.username}}</h1>
+  <p>Most recent 100 account-management events. Full audit records are retained in storage.</p>
+  <table>
+    <thead><tr><th scope="col">When</th><th scope="col">Event</th><th scope="col">Actor</th><th scope="col">Previous</th><th scope="col">New</th></tr></thead>
+    <tbody>{{#each account.events}}<tr><td><time>{{createdAt}}</time></td><td>{{event}}</td><td>{{actor}}</td><td>{{previousStatus}}</td><td>{{newStatus}}</td></tr>
+    {{else}}<tr><td colspan="5">No matching account audit records.</td></tr>{{/each}}</tbody>
+  </table>
+  <a href="/admin/users">Return to user management</a>
+</section>

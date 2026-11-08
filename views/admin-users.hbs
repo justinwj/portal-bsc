@@ -4,6 +4,42 @@
 </section>
 {{#if notice}}<p role="status">{{notice}}</p>{{/if}}
 {{#if error}}<p role="alert">{{error}}</p>{{/if}}
+<section class="card" aria-labelledby="registrations-title">
+  <h2 id="registrations-title">Pending Registrations</h2>
+  {{#each pendingRegistrations}}
+    <article>
+      <h3>{{username}}</h3><p>{{email}} — Pending Approval. Requested: <time>{{registration.requestedAt}}</time></p>
+      <form method="POST" action="/admin/users/{{_id}}/registration/approve">
+        <input type="hidden" name="_csrf" value="{{../csrfToken}}" />
+        <button type="submit" aria-label="Approve registration for {{username}}">Approve as member</button>
+      </form>
+      <form method="POST" action="/admin/users/{{_id}}/registration/reject">
+        <input type="hidden" name="_csrf" value="{{../csrfToken}}" />
+        <button type="submit" aria-label="Reject registration for {{username}}">Reject registration</button>
+      </form>
+    </article>
+  {{else}}<p>No pending registrations.</p>{{/each}}
+</section>
+<section class="card" aria-labelledby="deletions-title">
+  <h2 id="deletions-title">Pending Account Deletion Requests</h2>
+  <p>Approval closes access only. Account records, audit history and all associated files are retained.</p>
+  {{#each pendingDeletions}}
+    <article>
+      <h3>{{username}}</h3><p>Requested: <time>{{deletionRequest.requestedAt}}</time></p>
+      {{#if canClose}}
+      <form method="POST" action="/admin/users/{{_id}}/deletion/{{deletionRequest.id}}/approve">
+        <input type="hidden" name="_csrf" value="{{../csrfToken}}" />
+        <label><input type="checkbox" name="confirmed" value="yes" required /> I reviewed the request. Close access and retain all files and records.</label>
+        <button type="submit">Approve closure for {{username}}</button>
+      </form>
+      {{else}}<p>Protected administrator: approval cannot disable your own account or the last active administrator.</p>{{/if}}
+      <form method="POST" action="/admin/users/{{_id}}/deletion/{{deletionRequest.id}}/reject">
+        <input type="hidden" name="_csrf" value="{{../csrfToken}}" />
+        <button type="submit">Reject deletion request for {{username}}</button>
+      </form>
+    </article>
+  {{else}}<p>No pending deletion requests.</p>{{/each}}
+</section>
 <div class="grid two-col">
   <div class="card">
     <h2>Create user</h2>
@@ -30,19 +66,20 @@
         <tr>
           <td>{{this.username}}</td>
           <td>{{this.role}}</td>
-          <td>{{#if this.isActive}}Active{{else}}Disabled{{/if}}</td>
+          <td>{{accountStatus}}{{#if registration}}<br />Registration requested: <time>{{registration.requestedAt}}</time>{{#if registration.decidedAt}}<br />Decision: <time>{{registration.decidedAt}}</time>{{/if}}{{/if}}</td>
           <td>
             {{#if this.isSelf}}<span>Current account. Self-disable is prohibited.</span>{{/if}}
             {{#if this.isLastActiveAdmin}}<span>Protected: last active administrator.</span>{{/if}}
             {{#if this.canDisable}}
               <a href="/admin/users/{{this._id}}/disable" aria-label="Review disabling {{this.username}}">Disable</a>
             {{/if}}
-            {{#unless this.isActive}}
+            {{#if canEnable}}
               <form method="POST" action="/admin/users/{{this._id}}/enable">
                 <input type="hidden" name="_csrf" value="{{../csrfToken}}" />
                 <button type="submit" aria-label="Enable {{this.username}}">Enable</button>
               </form>
-            {{/unless}}
+            {{/if}}
+            <a href="/admin/users/{{_id}}/history">Audit history for {{username}}</a>
           </td>
         </tr>
         {{/each}}

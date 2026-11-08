@@ -1,4 +1,5 @@
-import { Equals, IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString, Matches, MinLength } from 'class-validator';
+import { Equals, IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { UserRole } from '../roles';
 
 export class LoginDto {
@@ -51,4 +52,23 @@ export class AccountStatusDto {
   @IsOptional()
   @Equals('yes', { message: 'Confirmation must be yes' })
   confirmed?: string;
+}
+
+// Deliberately independent of CreateUserDto: role/status are never public fields.
+export class RegistrationDto {
+  @Transform(({ value }) => typeof value === 'string' ? value.trim().toLowerCase() : value)
+  @IsString()
+  @Matches(/^[a-z0-9][a-z0-9_.-]{2,63}$/)
+  username: string;
+
+  @Transform(({ value }) => typeof value === 'string' ? value.trim().toLowerCase() : value)
+  @IsEmail()
+  @MaxLength(254)
+  email: string;
+
+  @IsString()
+  @MinLength(8)
+  @MaxLength(72)
+  @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).+$/)
+  password: string;
 }

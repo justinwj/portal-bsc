@@ -16,6 +16,8 @@ export class UsersController {
       ['enabled', 'Account enabled. The user must sign in again.'],
       ['disabled', 'Account disabled. Existing sessions can no longer access protected pages.'],
       ['unchanged', 'Account status was already set; no change was made.'],
+      ['registration-decided', 'Registration decision recorded. Repeated identical decisions make no further changes.'],
+      ['deletion-decided', 'Deletion request decision recorded. Account records and associated files are retained.'],
     ]);
     return this.renderUsers(req, res, { notice: notices.get(String(req.query.notice)) });
   }
@@ -24,7 +26,9 @@ export class UsersController {
     // Revalidate before rendering even on a rejected operation. A concurrent
     // disable must not return administration data in its rejection page.
     const users = await this.usersService.managementUsers(req.session.user.id);
-    return res.render('admin-users', { title: 'User management', user: req.session.user, users, ...feedback });
+    return res.render('admin-users', { title: 'User management', user: req.session.user, users,
+      pendingRegistrations: users.filter(u => u.registration?.status === 'pending'),
+      pendingDeletions: users.filter(u => u.deletionRequest?.status === 'pending'), ...feedback });
   }
 
   @Post('users')

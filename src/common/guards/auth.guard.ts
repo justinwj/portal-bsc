@@ -1,6 +1,7 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import { Request } from 'express';
 import { UsersService } from '../../users/users.service';
+import { isAccessibleAccount } from '../account-state';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -15,7 +16,7 @@ export class AuthGuard implements CanActivate {
     }
 
     const user = await this.usersService.findById(sessionUser.id);
-    if (!user || !user.isActive || (user.sessionVersion ?? 0) !== (sessionUser.sessionVersion ?? 0)) {
+    if (!isAccessibleAccount(user) || (user.sessionVersion ?? 0) !== (sessionUser.sessionVersion ?? 0)) {
       if (req.session) {
         req.session.destroy(() => undefined);
       }

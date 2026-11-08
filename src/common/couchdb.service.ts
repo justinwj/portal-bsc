@@ -15,6 +15,9 @@ export interface UserRecord {
   isActive: boolean;
   // Legacy records/sessions use zero. Every status transition revokes old cookies.
   sessionVersion?: number;
+  registration?: { status: 'pending' | 'approved' | 'rejected'; requestedAt: string; decidedAt?: string; decidedBy?: string };
+  deletionRequests?: { id: string; status: 'pending' | 'approved' | 'rejected'; requestedAt: string; decidedAt?: string; decidedBy?: string }[];
+  closedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -245,6 +248,14 @@ export class CouchDbService {
     }
     this.inMemory.audits.set(doc._id, doc);
     return doc;
+  }
+
+  async listUserAudits(userId: string): Promise<AuditRecord[]> {
+    const docs = this.db
+      ? (await this.db.use('portal_audit').list({ include_docs: true })).rows.map((row: any) => row.doc)
+      : Array.from(this.inMemory.audits.values());
+    return docs.filter((doc: AuditRecord) => doc?.type === 'audit' && doc.details?.targetUserId === userId)
+      .sort((a: AuditRecord, b: AuditRecord) => b.createdAt.localeCompare(a.createdAt)).slice(0, 100);
   }
 
   async logDownload(userId: string, fileId: string, fileTitle: string, ip?: string): Promise<DownloadRecord> {

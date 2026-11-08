@@ -1,0 +1,20 @@
+<section class="card">
+  <h1>Account settings</h1>
+  <p>{{account.username}} — {{account.email}}</p>
+  <h2>Account deletion requests</h2>
+  <p>A request does not delete or close your account. An administrator must review it. Approval closes access and requires separate explicit review before any permanent account or file disposition.</p>
+  {{#if account.pending}}<p role="status">Pending administrator review. Your account remains active.</p>
+  {{else}}
+  <form method="POST" action="/account/deletion-request">
+    <input type="hidden" name="_csrf" value="{{csrfToken}}" />
+    <label><input type="checkbox" name="confirmed" value="yes" required /> I want an administrator to review closing my account.</label>
+    <button type="submit">Request account deletion</button>
+  </form>
+  {{/if}}
+  <ul>
+    {{#each account.requests}}<li>
+      {{#if (eq status 'pending')}}Pending{{else}}{{#if (eq status 'rejected')}}Rejected{{else}}Approved{{/if}}{{/if}}
+      — requested <time>{{requestedAt}}</time>{{#if decidedAt}}, decided <time>{{decidedAt}}</time>{{/if}}
+    </li>{{else}}<li>No deletion requests.</li>{{/each}}
+  </ul>
+</section>

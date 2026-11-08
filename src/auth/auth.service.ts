@@ -4,6 +4,7 @@ import { UserRecord } from '../common/couchdb.service';
 import { LoginDto } from '../common/dto/common.dto';
 import { UserRole } from '../common/roles';
 import { UsersService } from '../users/users.service';
+import { isAccessibleAccount } from '../common/account-state';
 
 @Injectable()
 export class AuthService {
@@ -11,7 +12,7 @@ export class AuthService {
 
   async validateUser(dto: LoginDto): Promise<UserRecord | null> {
     const user = await this.usersService.findByUsername(dto.username);
-    if (!user || !user.isActive) {
+    if (!isAccessibleAccount(user)) {
       return null;
     }
     const isValid = await bcrypt.compare(dto.password, user.passwordHash);

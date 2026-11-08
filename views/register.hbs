@@ -1,0 +1,16 @@
+<section class="card auth-card">
+  <h1>Register</h1>
+  <p>Accounts require administrator approval before accessing protected resources. Email ownership is reviewed by the administrator; no email is sent automatically.</p>
+  {{#if submitted}}<p role="status">If the details are eligible, your registration is awaiting administrator review. You can sign in only after approval.</p>{{/if}}
+  {{#if error}}<p role="alert">{{error}}</p>{{/if}}
+  <form method="POST" action="/register">
+    <input type="hidden" name="_csrf" value="{{csrfToken}}" />
+    <label>Username<input name="username" required minlength="3" maxlength="64" autocomplete="username" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{2,63}" /></label>
+    <p>Use 3–64 letters, numbers, dots, underscores or hyphens; start with a letter or number. Usernames are saved in lowercase.</p>
+    <label>Email<input name="email" type="email" required maxlength="254" autocomplete="email" /></label>
+    <label>Password<input name="password" type="password" required minlength="8" maxlength="72" autocomplete="new-password" /></label>
+    <p>Use at least 8 characters with uppercase, lowercase and a digit, and no more than 72 UTF-8 bytes.</p>
+    <button type="submit">Request registration</button>
+  </form>
+  <p><a href="/login">Return to login</a></p>
+</section>

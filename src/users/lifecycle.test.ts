@@ -74,7 +74,7 @@ describe('registration and deletion lifecycle over real Nest HTTP', {concurrency
     assert.equal(user.registration.status,'pending');assert.ok(user.registration.requestedAt);assert.ok(await bcrypt.compare(password,user.passwordHash));
     assert.doesNotMatch((await a.client.request(result.headers.get('location')!)).body,/\$2[aby]\$|person@example|already exists/);
     const denied=await a.client.request('/login',{username:registration.username,password,_csrf:a.csrf});assert.equal(denied.headers.get('location'),'/login?error=invalid');
-    for(const path of ['/','/files','/files/kept-file/download'])assert.equal((await a.client.request(path)).status,401);
+    for(const path of ['/','/files','/download/kept-file'])assert.equal((await a.client.request(path)).status,401,path);
   });
   for(const field of ['role','isActive','registration','closedAt','sessionVersion'])it(`rejects public ${field} manipulation`,async()=>{
     const a=await anonymous();assert.equal((await a.client.request('/register',{...registration,[field]:'admin',_csrf:a.csrf})).status,400);
@@ -132,6 +132,10 @@ describe('registration and deletion lifecycle over real Nest HTTP', {concurrency
     assert.equal((await post(admin,deletion('missing','request','approve'))).status,404);
     assert.equal((await post(admin,decide(pending(),'registration','approve'),{role:'admin'})).status,400);
   });
+  it('rejects unsupported decision values without changing a pending registration',async()=>{
+    const id=pending(),admin=await login();assert.equal((await post(admin,decide(id,'registration','promote'))).status,400);
+    assert.equal(store.users.get(id).registration.status,'pending');
+  });
   it('lets authenticated users request deletion, shows pending status/date and does not close or delete anything yet',async()=>{
     const actor=await login('member');assert.equal((await actor.client.request('/account')).status,200);
     assert.equal((await post(actor,'/account/deletion-request')).status,303);
@@ -173,6 +177,10 @@ describe('registration and deletion lifecycle over real Nest HTTP', {concurrency
     const r=await Promise.all([post(a,deletion('other-admin',requestId('other-admin'),'approve')),post(b,deletion('admin',requestId('admin'),'approve'))]);
     assert.equal(r.filter(x=>x.status===303).length,1);assert.equal([...store.users.values()].filter(u=>u.role===UserRole.ADMIN&&u.isActive).length,1);
   });
+  it('cannot close the last active administrator when all other administrators are disabled',async()=>{
+    store.users.get('other-admin').isActive=false;const admin=await login();await post(admin,'/account/deletion-request');
+    assert.equal((await post(admin,deletion('admin',requestId('admin'),'approve'))).status,403);assert.equal(store.users.get('admin').isActive,true);
+  });
   it('requires explicit closure confirmation and rejects an unknown or forged request ID',async()=>{
     const actor=await login('member'),admin=await login();await post(actor,'/account/deletion-request');
     assert.equal((await post(admin,deletion('member','wrong','approve'))).status,409);
@@ -195,6 +203,11 @@ describe('registration and deletion lifecycle over real Nest HTTP', {concurrency
   it('reports a decision audit failure as a partial commit without exposing backend errors',async()=>{
     const id=pending(),admin=await login();store.failAudit=true;const result=await post(admin,decide(id,'registration','approve'));
     assert.equal(result.status,503);assert.equal(store.users.get(id).registration.status,'approved');assert.doesNotMatch(result.body,/private-audit-secret/);
+  });
+  it('keeps the pending registration intact when the decision write fails and logs no success',async()=>{
+    const id=pending(),admin=await login(),original=structuredClone(store.users.get(id));store.failWrite=true;
+    const r=await post(admin,decide(id,'registration','approve'));assert.equal(r.status,503);assert.deepEqual(store.users.get(id),original);
+    assert.equal(store.audits.filter(a=>a.event==='registration.approved').length,0);assert.doesNotMatch(r.body,/private-db-secret/);
   });
   it('keeps public duplicate and audit-failure responses generic and retains the pending record',async()=>{
     const a=await anonymous();store.failAudit=true;const r=await a.client.request('/register',{...registration,_csrf:a.csrf});assert.equal(r.status,303);
