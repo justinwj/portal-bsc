@@ -89,7 +89,9 @@ export class UsersService {
       const { actor, user } = await this.validateStatusChange(userId, isActive, actingAdminId);
       if (user.isActive === isActive) return { user, changed: false };
       const next = { ...user, isActive, updatedAt: new Date().toISOString(),
-        sessionVersion: (user.sessionVersion ?? 0) + (isActive ? 0 : 1) };
+        // Rotate on enable too: a legacy disabled record may still have old
+        // version-zero cookies that were never presented while disabled.
+        sessionVersion: (user.sessionVersion ?? 0) + 1 };
       let saved: UserRecord;
       try { saved = await this.couchDbService.saveUser(next); }
       catch { throw new ServiceUnavailableException('Unable to save the account status. Please try again when storage is available.'); }

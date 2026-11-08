@@ -65,6 +65,17 @@ describe('real CouchDB/Redis production account-management HTTP', { concurrency:
     assert.equal((await member.http.request('/', undefined, cookie)).status, 401);
     assert.equal((await (await login(2)).http.request('/')).status, 200);
   });
+  it('requires a fresh login when enabling a legacy disabled account without a session version', async () => {
+    const actor = await login(), member = await login(2); const cookie = member.http.cookie;
+    const legacy = await couch.findUserById(memberId);
+    assert.equal(legacy!.sessionVersion, undefined);
+    // Arrange only this new disposable record as if disabled by the old release.
+    await couch.saveUser({ ...legacy!, isActive: false });
+    assert.equal((await change(actor, memberId, true)).status, 302);
+    assert.ok((await client.use('portal_users').get(memberId)).sessionVersion > 0);
+    assert.equal((await member.http.request('/', undefined, cookie)).status, 401);
+    assert.equal((await (await login(2)).http.request('/')).status, 200);
+  });
   it('serializes conflicting production HTTP administrator operations and rechecks the losing actor', async () => {
     const actor = await login(), other = await login(1);
     const results = await Promise.all([change(actor, otherId, false), change(other, actorId, false)]);

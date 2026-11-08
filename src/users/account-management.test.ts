@@ -230,6 +230,15 @@ describe('account-management safety over real Nest HTTP', { concurrency: false }
     store.users.get('member')!.isActive = true;
     assert.equal((await member.client.request('/', undefined, cookie)).status, 401);
   });
+  it('revokes legacy version-zero cookies when enabling an account disabled before session versioning existed', async () => {
+    const actor = await login(), member = await login('member'); const cookie = member.client.cookie;
+    // Model a persisted pre-7D disabled account and its never-presented cookie.
+    store.users.get('member')!.isActive = false;
+    delete store.users.get('member')!.sessionVersion;
+    assert.equal((await change(actor, 'member', true)).status, 302);
+    assert.equal((await member.client.request('/', undefined, cookie)).status, 401);
+    assert.equal((await (await login('member')).client.request('/')).status, 200);
+  });
   it('records actor, target, statuses, timestamp and request context without credentials', async () => {
     const actor = await login(); await change(actor, 'member', false); await change(actor, 'member', true);
     const audit = store.audits.filter(a => a.event.startsWith('user.')); assert.equal(audit.length, 2);
