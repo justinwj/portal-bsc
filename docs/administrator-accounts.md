@@ -3,11 +3,13 @@
 Open **Users** while signed in as an active administrator. The page identifies your current account and displays each user's role and Active/Disabled status. Only active administrators may view or change account management.
 
 - **Disable** opens a server-rendered confirmation page. Review the username, then confirm or cancel. Disabling blocks subsequent protected requests, including existing sessions. It does not cancel a response or download already authorized and in progress.
-- **Enable** reactivates a disabled account. Its username, role, email and password hash are preserved. The user must log in again; old sessions cannot be restored by enabling the account.
+- **Enable** reactivates an approved or legacy disabled account. Its username, role, email and password hash are preserved. The user must log in again; old sessions cannot be restored by enabling the account. Pending/rejected registrations and Closed accounts require their own policy and cannot be enabled here.
 - Your current account cannot be disabled through ordinary user management, even if other administrators exist. The last active administrator is protected. Disabled administrators do not count as active administrators.
 - Repeating a completed enable or disable is a no-op, with an explanatory message and no duplicate status-change audit. Repeated self-disable is always rejected.
 
 These restrictions apply in the service as well as the interface. Both POST actions require an authenticated, active administrator and a valid session CSRF token. Disabling also requires the explicit confirmation value. No inline script or relaxed CSP is needed.
+
+For public registration, Pending Registrations, deletion-request decisions and account audit review, see [Registration and account lifecycle](account-lifecycle.md). These operations share the same mutation queue and preserve the self-disable/last-administrator protections.
 
 ## Concurrency and deployment boundary
 

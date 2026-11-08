@@ -1,6 +1,6 @@
 # portal-bsc
 
-Release-1 internal file portal scaffold for a Synology NAS deployment. This is intentionally constrained to secure server-rendered login, file access, and admin management without public self-service or external integrations.
+Internal file portal for a Synology NAS deployment, with secure server-rendered login, file access, administrator management, approval-controlled registration and account-closure requests.
 
 ## Status
 
@@ -12,6 +12,8 @@ Release-1 internal file portal scaffold for a Synology NAS deployment. This is i
 - Bcrypt password hashing and inactive-user blocking
 - Helmet and rate limiting on HTTP entry points
 - CSRF protection for SSR forms with session-backed tokens
+- Pending registration with administrator approval, account-deletion requests and retained-record closure
+- Administrator lockout prevention, session revocation and account-workflow audits
 - Redis-backed session storage in production mode
 - Audit logging for login success/failure and downloads
 - `/healthz` JSON health endpoint
@@ -32,7 +34,7 @@ Release-1 internal file portal scaffold for a Synology NAS deployment. This is i
 - Cookies are secure and HTTP-only when running behind TLS or in production mode.
 - The app never exposes raw NAS paths or user-supplied path segments.
 - Access control is enforced server-side before a file is streamed to the browser.
-- Public registration is intentionally disabled.
+- Public registration creates inactive pending accounts; an active administrator must approve access as a member.
 
 ## Local development
 Use Node.js 22.23.4 or newer within the Node 22 major and npm 10.9.9. No global Nest CLI is required.
@@ -64,6 +66,8 @@ The development runner launches only complete, error-free builds, stops on compi
 - `nginx/portal.conf` shows an example upstream service target of `http://app:3000` for Dockerized deployments.
 
 ## Admin bootstrap
+For registration approval, account deletion requests, retained records/files and workflow audits, see [Registration and account lifecycle](docs/account-lifecycle.md). Quotas and uploads remain deferred.
+
 For disabling and reactivating accounts, administrator lockout prevention, session revocation, audit failures, and the single-instance concurrency boundary, see [Administrator account safety](docs/administrator-accounts.md).
 
 Run:
