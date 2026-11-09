@@ -1,8 +1,18 @@
 # Session 7G-B: managed uploads and selective sharing
 
-Status: B1/B2 implemented; B3 local verification complete, independent GitHub Actions verification pending. No NAS deployment or interactive Rider acceptance is claimed. The final CI section below will be updated with executed results before handoff.
+Status: B1/B2/B3 implemented and independently verified in GitHub Actions. **474 distinct tests / 627 passing executions; zero failed, cancelled or skipped.** No NAS deployment or interactive Rider acceptance is claimed. Return for independent review before any operational deployment.
 
 Starting SHA: `0e64e21a8b424e1c0e23c8cc849543d4d0d5e751`, branch `codex/portal-bsc-r1-fixes`.
+
+Final verified implementation/test SHA: **`2d60dc39c344c39eda2289286d4a9756188fd0b1`**. This evidence report is published in a documentation-only descendant; the final publication SHA is provided in the handoff, avoiding a self-referential commit hash inside its own content. Runtime code is unchanged by that publication.
+
+| Increment | Commit |
+| --- | --- |
+| Initial executable RED HTTP cases | `50312a21a34a91efa2faf43ac083cc536a189ef0` |
+| B1 reserved streaming pipeline/recovery | `d55950f5c8e79d298273155898c2449e00812796` |
+| B2 selective sharing/downloads | `568514a3def7170144200b23634fe9f268cced19` |
+| B3 fault coverage, production configuration and operations guide | `0dc6e16283ca59c31f5a96f2f369f6559d5d0e09` |
+| Canonical Windows temporary fixture correction | `2d60dc39c344c39eda2289286d4a9756188fd0b1` |
 
 ## Baseline and preservation
 
@@ -110,7 +120,22 @@ The host additionally used Node 24.19.0/npm 11.17.0 for local Windows checks; th
 
 First independent run: [42576453952](https://github.com/justinwj/portal-bsc/actions/runs/42576453952), source `0dc6e16283ca59c31f5a96f2f369f6559d5d0e09`. Linux **367/367** unit/HTTP/tooling and **88/88** real-service tests passed; production image/Compose **19/19** passed, including actual non-root managed writes, retained read-only NAS access and restart/recreation persistence. Both audits and peer validation passed in the Linux job.
 
-The run correctly failed on Windows: tooling **32/32** passed, but upload/content execution was **41 passed / 80 failed**, zero cancelled/skipped. Every HTTP case failed its setup at the strict canonical-root check; content-family cases passed. The temporary test root was not canonicalized before configuration. Corrected only the fixture to resolve the actual temporary directory before use and log any disposable-path normalization; production symlink rejection remains unchanged. Local retest **121/121** passed. The corrected source is awaiting a new complete CI run; final success is not claimed yet.
+The run correctly failed on Windows: tooling **32/32** passed, but upload/content execution was **41 passed / 80 failed**, zero cancelled/skipped. Every HTTP case failed its setup at the strict canonical-root check; content-family cases passed. The temporary test root was not canonicalized before configuration. Corrected only the fixture to resolve the actual temporary directory before use and log any disposable-path normalization; production symlink rejection remains unchanged. Local retest **121/121** passed. The successful rerun's diagnostics confirmed Windows expanded `C:\Users\RUNNER~1` into `C:\Users\runneradmin`; this was a disposable fixture alias, not a reason to permit symlink roots.
+
+Final completed implementation run: [42576878840](https://github.com/justinwj/portal-bsc/actions/runs/42576878840), SHA `2d60dc39c344c39eda2289286d4a9756188fd0b1`. Inspected every job's steps and test/audit summaries:
+
+| Executed suite | Passed | Failed | Cancelled | Skipped |
+| --- | ---: | ---: | ---: | ---: |
+| Linux full unit/HTTP/tooling | 367 | 0 | 0 | 0 |
+| Real Redis/CouchDB integration | 88 | 0 | 0 | 0 |
+| Production Docker/Compose persistence/startup | 19 | 0 | 0 | 0 |
+| Additional Windows tooling executions | 32 | 0 | 0 | 0 |
+| Additional Windows managed HTTP/content executions | 121 | 0 | 0 | 0 |
+| **Total executions** | **627** | **0** | **0** | **0** |
+
+The first three rows cover **474 distinct cases**; Windows repeats 153 of those. The initial baseline was 328 distinct/351 executions. Added 146 distinct cases: 80 managed HTTP, 41 content validation, two accounting, nine browser/configuration tooling, nine real-service and five container cases. Existing cases remain enabled.
+
+All jobs completed successfully. Typecheck/production build passed on Linux and Windows. The production image built, started, bootstrapped the disposable administrator and served real managed/legacy downloads; retained payloads, hashes, ownership and policy survived actual restarts and container recreation. The existing production high/critical gate passed. Full/production audits reported **0 critical, 0 high, 0 moderate, 0 low**, and `npm ls --all` exited 0 on Linux and Windows. No package/override changes or advisory exceptions were introduced.
 
 ## Exact changed files
 
@@ -163,7 +188,9 @@ views/upload-settings.hbs
 views/uploads.hbs
 ```
 
-The staged `.idea/.gitignore`, `.idea/encodings.xml`, `.idea/indexLayout.xml` and unrelated untracked `docs/development-session-7c-options.md` are excluded. No credentials, records, NAS files, volumes or images were published/removed by these commits.
+These are **44 files**, checked against the actual starting-to-final Git diff. The staged `.idea/.gitignore`, `.idea/encodings.xml`, `.idea/indexLayout.xml` and unrelated untracked `docs/development-session-7c-options.md` are excluded. Original `.idea` file hashes and staged blob IDs were verified unchanged. No existing local user records, production credentials or NAS files were altered; no volume was deleted or image published. Only positively identified disposable fixture metadata/partial files were cleaned by tests.
+
+Local session-owned Redis/CouchDB containers were stopped after verification. Eight test data volumes remain intentionally retained (prefixes `portal-7gb-couch[-full|-crash|-final]-data-*` and corresponding Redis names); no `down -v`, volume deletion or prune operation was used. GitHub's disposable Compose cleanup also verifies that its named database volume remains after `down`.
 
 ## Remaining risks and manual acceptance
 
