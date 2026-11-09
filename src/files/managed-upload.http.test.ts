@@ -52,7 +52,10 @@ describe('managed upload admission and streaming HTTP',{concurrency:false},()=>{
   let app:NestExpressApplication,store:UploadStore,root:string,nas:string,url:string;
   const original={...process.env},password='UploadPassword123';
   beforeEach(async()=>{
-    root=await mkdtemp(join(tmpdir(),'portal-upload-test-'));nas=join(root,'legacy');await mkdir(nas);await writeFile(join(nas,'sentinel.txt'),'legacy unchanged');
+    const temporary=await mkdtemp(join(tmpdir(),'portal-upload-test-'));
+    root=await filesystem.realpath(temporary);
+    if(root!==temporary)console.log('Canonicalized disposable temporary storage root',JSON.stringify({temporary,canonical:root}));
+    nas=join(root,'legacy');await mkdir(nas);await writeFile(join(nas,'sentinel.txt'),'legacy unchanged');
     const managed=join(root,'managed');await mkdir(managed);for(const d of ['staging','objects','quarantine'])await mkdir(join(managed,d));
     Object.assign(process.env,{NODE_ENV:'test',ALLOW_IN_MEMORY_SESSION_STORE:'true',NAS_FILES_DIR:nas,NAS_FILES_HOST_PATH:nas,PORTAL_UPLOADS_ENABLED:'true',PORTAL_UPLOADS_DIR:managed,PORTAL_UPLOADS_HOST_PATH:managed,PORTAL_UPLOADS_STORAGE_ID:randomUUID(),PORTAL_UPLOAD_MIN_FREE_BYTES:'1'});
     await writeFile(join(managed,'.portal-storage.json'),JSON.stringify({schemaVersion:1,id:process.env.PORTAL_UPLOADS_STORAGE_ID}));

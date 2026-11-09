@@ -108,7 +108,9 @@ The host additionally used Node 24.19.0/npm 11.17.0 for local Windows checks; th
 
 ## GitHub Actions verification
 
-Pending push of the completed source for independent CI. Do not interpret planned CI counts as executed. The workflow retains the full regression, real-service and production image/Compose jobs and adds Windows managed-file/content checks. Container tests now cover actual non-root writes to the managed bind, unchanged read-only legacy access, restart/recreation persistence, and missing/overlapping host-source rejection. Final run links, counts and commit IDs will be entered after inspecting completed jobs.
+First independent run: [42576453952](https://github.com/justinwj/portal-bsc/actions/runs/42576453952), source `0dc6e16283ca59c31f5a96f2f369f6559d5d0e09`. Linux **367/367** unit/HTTP/tooling and **88/88** real-service tests passed; production image/Compose **19/19** passed, including actual non-root managed writes, retained read-only NAS access and restart/recreation persistence. Both audits and peer validation passed in the Linux job.
+
+The run correctly failed on Windows: tooling **32/32** passed, but upload/content execution was **41 passed / 80 failed**, zero cancelled/skipped. Every HTTP case failed its setup at the strict canonical-root check; content-family cases passed. The temporary test root was not canonicalized before configuration. Corrected only the fixture to resolve the actual temporary directory before use and log any disposable-path normalization; production symlink rejection remains unchanged. Local retest **121/121** passed. The corrected source is awaiting a new complete CI run; final success is not claimed yet.
 
 ## Exact changed files
 
