@@ -38,7 +38,7 @@ The default quota applies when a user has no individual override. An override ta
 
 The global storage policy applies independently to all known Portal-managed file usage, including retained files owned by disabled or Closed accounts. Lowering a storage policy below known usage is permitted and displays **Over limit**. It does not remove data or block existing downloads.
 
-**Upload quota enforcement is not implemented. Session 7G will enforce policy when committing Portal-managed uploads.** This is not a limit on the whole DS925+, a Synology share, filesystem free space or direct SMB writes. It is not a disk-capacity or filesystem-integrity scanner.
+**Upload quota enforcement is not implemented.** The [Session 7G-A architecture proposal](development-session-7g-design.md) describes reservations and commit-time checks for independent review; Phase 7G-B implementation requires explicit approval. This is not a limit on the whole DS925+, a Synology share, filesystem free space or direct SMB writes. It is not a disk-capacity or filesystem-integrity scanner.
 
 ### Usage accounting
 
