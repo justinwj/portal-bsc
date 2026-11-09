@@ -1,7 +1,7 @@
 <section class="page-header">
   <h1>Capacity and storage policy</h1>
   <p>1 GB = 1,000,000,000 bytes. Limits are stored as exact integer bytes.</p>
-  <p>Storage is metadata-only reporting for explicitly Portal-managed files. Existing NAS files and direct SMB writes are outside this accounting. Upload limits are not enforced until Session 7G; files are never changed to meet a quota.</p>
+  <p>Session 7G enforces upload quotas using durable reservations. Known bytes include committed/legacy-marked managed metadata and full outstanding reservations. Existing NAS files and direct SMB writes are outside this accounting; files are never changed to meet a quota.</p>
 </section>
 {{#if saved}}<p role="status">Settings processed. Unchanged submissions make no further changes.</p>{{/if}}
 <section class="card">
@@ -22,6 +22,7 @@
 <section class="card">
   <h2>Global managed usage</h2>
   <p>Global known managed bytes: {{settings.globalBytes}} ({{settings.globalGb}} GB). Distinct managed file IDs: {{settings.managedFiles}}.</p>
+  <p>Committed/legacy-marked bytes: {{settings.committedBytes}}. Reserved/uncertain bytes: {{settings.reservedBytes}}. Reservation bytes are charged capacity, not a measurement of bytes already written.</p>
   <p>{{settings.globalStatus}}. Remaining bytes: {{settings.globalRemaining}}.</p>
   <p>Legacy or external metadata excluded: {{settings.excluded}}.</p>
   <p>Unattributed known bytes: {{settings.unattributedBytes}}.</p>

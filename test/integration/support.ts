@@ -41,6 +41,7 @@ export async function launchApplication(redisUrl = dependencyUrl('REDIS_URL'), o
       REDIS_URL: redisUrl,
       COUCHDB_URL: dependencyUrl('COUCHDB_URL'),
       NAS_FILES_DIR: directory,
+      NAS_FILES_HOST_PATH: directory,
       ADMIN_USERNAME: 'ci-admin',
       ADMIN_EMAIL: 'ci-admin@example.test',
       ADMIN_PASSWORD: 'TemporaryPassword123',
@@ -70,6 +71,7 @@ export async function launchApplication(redisUrl = dependencyUrl('REDIS_URL'), o
   return {
     ready, exited, url: `http://127.0.0.1:${port}`,
     get output() { return output; },
+    crash() { child.kill('SIGKILL'); },
     async close() {
       if (child.exitCode === null && child.signalCode === null) child.kill();
       await exited;

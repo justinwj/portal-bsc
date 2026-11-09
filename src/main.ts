@@ -15,6 +15,7 @@ import { FilesService } from './files/files.service';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  app.enableShutdownHooks();
   const port = Number(process.env.PORT ?? 3000);
   const isProduction = process.env.NODE_ENV === 'production';
   const sessionSecret = process.env.SESSION_SECRET ?? (isProduction ? undefined : 'development-session-secret');

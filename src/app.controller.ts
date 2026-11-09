@@ -10,7 +10,7 @@ export class AppController {
 
   @Get('/')
   async dashboard(@Req() req: Request & { session?: any }, @Res() res: Response) {
-    const files = await this.filesService.listFilesForUser(req.session.user);
+    const files = await this.filesService.listFilesForUser(req.session.user,{ip:req.ip,userAgent:req.get('user-agent')});
     return res.render('dashboard', {
       title: 'Dashboard',
       user: req.session.user,
@@ -20,7 +20,7 @@ export class AppController {
 
   @Get('/files')
   async filesPage(@Req() req: Request & { session?: any }, @Res() res: Response) {
-    const files = await this.filesService.listFilesForUser(req.session.user);
+    const files = await this.filesService.listFilesForUser(req.session.user,{ip:req.ip,userAgent:req.get('user-agent')});
     return res.render('files', { title: 'Files', user: req.session.user, files });
   }
 
@@ -30,7 +30,7 @@ export class AppController {
     if (!file) {
       throw new NotFoundException('File not found');
     }
-    const visible = await this.filesService.getFileForDownload(id, req.session.user);
+    const visible = await this.filesService.getFileForDownload(id, req.session.user,{ip:req.ip,userAgent:req.get('user-agent')});
     return res.render('file-detail', { title: file.title, file: visible, user: req.session.user });
   }
 }

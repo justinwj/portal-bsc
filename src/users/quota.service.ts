@@ -20,6 +20,7 @@ export class QuotaService {
         updatedAt: policy.updatedAt, updatedBy: policy.updatedBy,
         overCapacity: policy.maxActiveUsers.mode === 'limited' && activeCount > policy.maxActiveUsers.count,
         globalBytes: usage.knownBytes.toString(), globalGb: formatGB(usage.knownBytes), managedFiles: usage.managedFiles,
+        committedBytes:usage.committedBytes.toString(),reservedBytes:usage.reservedBytes.toString(),
         globalStatus: limitStatus(policy.globalStorageQuota, usage.knownBytes, usage.complete),
         globalRemaining: remainingBytes(policy.globalStorageQuota, usage.knownBytes, usage.complete),
         incomplete: !usage.complete, unattributedBytes: usage.unattributedBytes.toString(), incompleteAttribution: !usage.attributionComplete,

@@ -1,0 +1,18 @@
+# Opt-in managed storage. Use together with docker-compose.app.yml only after
+# provisioning the verified directory, marker, permissions and backup coverage.
+services:
+  app:
+    environment:
+      PORTAL_UPLOADS_ENABLED: 'true'
+      PORTAL_UPLOADS_DIR: /var/lib/portal-bsc/uploads
+      PORTAL_UPLOADS_HOST_PATH: ${PORTAL_UPLOADS_HOST_PATH:?Select an existing dedicated managed-storage directory}
+      PORTAL_UPLOADS_STORAGE_ID: ${PORTAL_UPLOADS_STORAGE_ID:?Verify managed storage identity}
+      PORTAL_UPLOAD_MIN_FREE_BYTES: ${PORTAL_UPLOAD_MIN_FREE_BYTES:?Select disk-space headroom}
+      PORTAL_UPLOAD_MAX_OBJECTS_PER_USER: ${PORTAL_UPLOAD_MAX_OBJECTS_PER_USER:-1000}
+    volumes:
+      - type: bind
+        source: ${PORTAL_UPLOADS_HOST_PATH:?Select an existing dedicated managed-storage directory}
+        target: /var/lib/portal-bsc/uploads
+        read_only: false
+        bind:
+          create_host_path: false

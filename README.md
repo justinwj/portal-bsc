@@ -15,6 +15,8 @@ Internal file portal for a Synology NAS deployment, with secure server-rendered 
 - Pending registration with administrator approval, account-deletion requests and retained-record closure
 - Administrator lockout prevention, session revocation and account-workflow audits
 - Persistent administrator capacity controls and metadata-based storage quota policy/reporting
+- Opt-in streaming managed uploads with durable quota reservations, recovery and owner-selected sharing
+- Private-by-default managed files, audited administrator grants and attachment-only Office downloads
 - Redis-backed session storage in production mode
 - Audit logging for login success/failure and downloads
 - `/healthz` JSON health endpoint
@@ -25,7 +27,7 @@ Internal file portal for a Synology NAS deployment, with secure server-rendered 
 - Production deployment should require a real Redis and CouchDB service; the app will fail fast if those are unavailable in production mode.
 
 ### Planned after R1
-- Granular per-user or per-department authorization beyond role-based access
+- Department/group sharing beyond the managed-file owner and selected-recipient model
 - Advanced audit retention and export
 - Advanced file lifecycle management beyond the initial scaffold
 - Password reset workflows
@@ -36,6 +38,8 @@ Internal file portal for a Synology NAS deployment, with secure server-rendered 
 - The app never exposes raw NAS paths or user-supplied path segments.
 - Access control is enforced server-side before a file is streamed to the browser.
 - Public registration creates inactive pending accounts; an active administrator must approve access as a member.
+- Managed uploads require explicit administrator quota confirmation and separate writable storage. Legacy NAS mounts remain read-only. Administrators need an owner grant to access another user's managed file.
+- Uploaded content remains untrusted; scheduled Synology scanning is not a scan-before-download guarantee.
 
 ## Local development
 Use Node.js 22.23.4 or newer within the Node 22 major and npm 10.9.9. No global Nest CLI is required.
@@ -60,6 +64,7 @@ The development runner launches only complete, error-free builds, stops on compi
 - Set runtime secrets through protected environment variables or a deployment secret manager. `ADMIN_*` values are required only for explicit administrator bootstrap and should be removed from the runtime environment after verified initialization.
 - Production requires an existing, readable/searchable NAS directory; the app does not create a replacement and needs no NAS write access. Set `NAS_FILES_HOST_PATH` explicitly for the read-only Compose bind to `/var/lib/portal-bsc/files`; missing bind sources must fail.
 - Follow [DS925+ readiness and NAS preflight](docs/ds925-production-readiness.md) before any separately approved deployment, including Container Manager/Compose compatibility checks.
+- Use [Managed uploads, sharing and recovery](docs/managed-uploads.md) for the opt-in `docker-compose.uploads.yml`, verified non-root UID/GID, storage marker, quota confirmation, scheduled antivirus and backup checks. Existing directories and explicit host paths are required; no NAS deployment is performed by this change.
 
 ## Docker and reverse proxy
 - `Dockerfile` uses a multi-stage build.
@@ -67,7 +72,7 @@ The development runner launches only complete, error-free builds, stops on compi
 - `nginx/portal.conf` shows an example upstream service target of `http://app:3000` for Dockerized deployments.
 
 ## Admin bootstrap
-For registration approval, account deletion requests, retained records/files and workflow audits, see [Registration and account lifecycle](docs/account-lifecycle.md). See [Capacity and quota controls](docs/capacity-and-quotas.md) for active-user enforcement, decimal-GB policy/reporting and the explicit bootstrap exception. Upload enforcement remains deferred to Session 7G.
+For registration approval, account deletion requests, retained records/files and workflow audits, see [Registration and account lifecycle](docs/account-lifecycle.md). See [Capacity and quota controls](docs/capacity-and-quotas.md) for active-user enforcement, decimal-GB policy/reporting and the explicit bootstrap exception. Managed uploads enforce confirmed per-user/global quotas at reservation and finalization; [the upload guide](docs/managed-uploads.md) documents scope and recovery limits.
 
 For disabling and reactivating accounts, administrator lockout prevention, session revocation, audit failures, and the single-instance concurrency boundary, see [Administrator account safety](docs/administrator-accounts.md).
 
@@ -79,5 +84,6 @@ Supply valid `ADMIN_USERNAME`, `ADMIN_EMAIL`, and `ADMIN_PASSWORD` inputs plus a
 Remove all three bootstrap inputs from the runtime environment and recreate the app container after verifying login. Keep the administrator login secret separately; retain required CouchDB/session runtime secrets. See the [bootstrap policy](docs/ds925-production-readiness.md#administrator-initialization-and-collision-policy).
 
 ## Known limitations
-- R1 is intentionally scoped to role-based authorization; it is not yet a complete per-user permission model.
-- The app does not implement password reset or public signup.
+- Legacy NAS files use role-based authorization; managed files use owner/selected-recipient grants. Department permissions and anonymous links are not implemented.
+- The app does not implement password reset. Public registration requires administrator approval.
+- One application writer is supported. Actual DSM ACLs, antivirus scheduling, backup restore and interactive Rider/Office acceptance still require operator verification.

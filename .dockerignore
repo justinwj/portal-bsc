@@ -5,6 +5,7 @@ dist
 coverage
 tmp
 data
+uploads
 logs
 *.log
 .env

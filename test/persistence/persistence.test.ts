@@ -2,7 +2,7 @@ import 'reflect-metadata';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, readFile, rm, stat, writeFile, unlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
@@ -30,6 +30,9 @@ describe('production Compose storage and application container', { concurrency: 
   let records: { user: any; file: any; audit: any };
   let nasDirectory: string;
   let quotaConfigured = false;
+  let managedDirectory:string;
+  const managedStorageId=randomUUID();
+  let managedEnabled=false,managedFile:any;
 
   async function ensureQuotaPolicy() {
     await ensureStack();
@@ -59,9 +62,9 @@ describe('production Compose storage and application container', { concurrency: 
     assert.match(settings.body, /3\.5/);
   }
 
-  async function compose(args: string[], override = true, environment: NodeJS.ProcessEnv = {}) {
+  async function compose(args: string[], override = true, environment: NodeJS.ProcessEnv = {}, uploads = false) {
     return exec('docker', ['compose', '--project-name', project, '--env-file', '.env',
-      '-f', 'docker-compose.app.yml', ...(override ? ['-f', 'test/persistence/compose.ci.yml'] : []), ...args],
+      '-f', 'docker-compose.app.yml', ...(uploads ? ['-f','docker-compose.uploads.yml'] : []), ...(override ? ['-f', 'test/persistence/compose.ci.yml'] : []), ...args],
     { timeout: 60000, maxBuffer: 2 * 1024 * 1024, env: { ...process.env, ...environment } });
   }
 
@@ -69,6 +72,9 @@ describe('production Compose storage and application container', { concurrency: 
     assert.equal(process.env.GITHUB_ACTIONS, 'true', 'Only disposable GitHub-hosted CI resources may run this suite');
     assert.equal(process.env.INTEGRATION_TESTS, '1');
     nasDirectory = await mkdtemp(join(tmpdir(), 'portal-compose-nas-'));
+    managedDirectory=await mkdtemp(join(tmpdir(),'portal-compose-managed-'));
+    for(const d of ['staging','objects','quarantine'])await mkdir(join(managedDirectory,d),{mode:0o700});
+    await writeFile(join(managedDirectory,'.portal-storage.json'),JSON.stringify({schemaVersion:1,id:managedStorageId}),{mode:0o600});
     await writeFile(join(nasDirectory, 'sentinel.txt'), 'pre-existing NAS fixture');
     // Exclusive creation: never replace a user's environment file.
     await writeFile('.env', [
@@ -76,6 +82,9 @@ describe('production Compose storage and application container', { concurrency: 
       `COUCHDB_PASSWORD=${password}`, 'ADMIN_USERNAME=persistence-admin',
       'ADMIN_EMAIL=persistence@example.test', `ADMIN_PASSWORD=${adminPassword}`,
       `NAS_FILES_HOST_PATH=${nasDirectory}`,
+      `PORTAL_APP_UID=${process.getuid!()}`, `PORTAL_APP_GID=${process.getgid!()}`,
+      `PORTAL_UPLOADS_HOST_PATH=${managedDirectory}`, `PORTAL_UPLOADS_STORAGE_ID=${managedStorageId}`,
+      'PORTAL_UPLOAD_MIN_FREE_BYTES=1048576',
     ].join('\n'), { flag: 'wx' });
     createdEnv = true;
     Object.assign(process.env, { NODE_ENV: 'production', COUCHDB_URL: 'http://127.0.0.1:5984',
@@ -98,6 +107,7 @@ describe('production Compose storage and application container', { concurrency: 
     } finally {
       if (createdEnv) await unlink('.env');
       if (nasDirectory) await rm(nasDirectory, { recursive: true, force: true });
+      if (managedDirectory) await rm(managedDirectory, { recursive: true, force: true });
     }
   });
 
@@ -296,5 +306,38 @@ describe('production Compose storage and application container', { concurrency: 
     await compose(['up', '-d', '--no-deps', '--force-recreate', 'couchdb']); await ready(() => client.db.get('portal_users'));
     const after = await dataMount(); assert.notEqual(after.id, before.id); assert.equal(after.volume, before.volume);
     await compose(['up', '-d', '--no-deps', '--force-recreate', 'app']); await applicationReady(); await verifyQuotaPolicy();
+  });
+
+  async function managedActor(){const http=browser('http://127.0.0.1:3000'),login=await http.request('/login');assert.equal((await http.request('/login',{username:'persistence-admin',password:adminPassword,_csrf:formToken(login.body)})).headers.get('location'),'/');return{http,csrf:formToken((await http.request('/')).body)};}
+  async function ensureManaged(){
+    await ensureQuotaPolicy();if(managedEnabled)return;
+    await compose(['up','-d','--no-build'],true,{},true);await applicationReady();const a=await managedActor();assert.equal((await a.http.request('/admin/settings/uploads',{maxUploadGb:'1',confirm:'yes',_csrf:a.csrf})).status,303);managedEnabled=true;
+    const data=Buffer.from('persistent managed upload');
+    const intent=await fetch('http://127.0.0.1:3000/uploads/intents',{method:'POST',headers:{cookie:a.http.cookie,'x-forwarded-proto':'https','x-csrf-token':a.csrf,'content-type':'application/json'},body:JSON.stringify({originalFilename:'persistent.txt',title:'Persistent managed upload',description:'test-only persisted bytes',sizeBytes:String(data.length),idempotencyKey:randomUUID()})});assert.equal(intent.status,201,await intent.clone().text());const {id}=await intent.json() as any;
+    const upload=await fetch(`http://127.0.0.1:3000/uploads/${id}/content`,{method:'PUT',headers:{cookie:a.http.cookie,'x-forwarded-proto':'https','x-csrf-token':a.csrf,'content-type':'application/octet-stream'},body:new Uint8Array(data)});assert.equal(upload.status,200,await upload.text());managedFile=await client.use('portal_files').get(id);
+  }
+  async function verifyManaged(){
+    const stored=await client.use('portal_files').get(managedFile._id);assert.equal(stored.upload.state,'committed');assert.equal(stored.sha256,managedFile.sha256);assert.equal(stored.uploadedByUserId,managedFile.uploadedByUserId);
+    assert.equal(await readFile(join(managedDirectory,'objects',stored.storedFilename),'utf8'),'persistent managed upload');const a=await managedActor(),download=await a.http.request(`/download/${stored._id}`);assert.equal(download.status,200,download.body);assert.equal(download.body,'persistent managed upload');
+    const policy=await client.use('portal_users').get('managed-upload-policy');assert.equal(policy.confirmed,true);assert.equal(policy.maxFileBytes,'1000000000');
+  }
+  it('runs actual production uploads as non-root with isolated writable storage and a read-only legacy mount',async()=>{
+    await ensureManaged();const id=(await compose(['ps','--quiet','app'],true,{},true)).stdout.trim(),container=JSON.parse((await exec('docker',['inspect',id])).stdout)[0];
+    const legacy=container.Mounts.find((m:any)=>m.Destination==='/var/lib/portal-bsc/files'),managed=container.Mounts.find((m:any)=>m.Destination==='/var/lib/portal-bsc/uploads');assert.equal(legacy.RW,false);assert.equal(managed.RW,true);assert.notEqual(legacy.Source,managed.Source);
+    const identity=await compose(['exec','-T','app','node','-e','console.log(JSON.stringify({uid:process.getuid(),gid:process.getgid()}))'],true,{},true);const actual=JSON.parse(identity.stdout);assert.notEqual(actual.uid,0);assert.notEqual(actual.gid,0);await verifyManaged();
+  });
+  it('retains managed payloads, ownership, hashes and quota policy after CouchDB/application restart',async()=>{
+    await ensureManaged();await compose(['restart','couchdb'],true,{},true);await ready(()=>client.db.get('portal_users'));await compose(['restart','app'],true,{},true);await applicationReady();await verifyManaged();
+  });
+  it('retains managed payloads after real container recreation with the same database volume and host bind',async()=>{
+    await ensureManaged();const before=await dataMount(),oldApp=(await compose(['ps','--quiet','app'],true,{},true)).stdout.trim();
+    await compose(['up','-d','--no-deps','--force-recreate','couchdb'],true,{},true);await ready(()=>client.db.get('portal_users'));
+    await compose(['up','-d','--no-deps','--force-recreate','app'],true,{},true);await applicationReady();const after=await dataMount();assert.notEqual(after.id,before.id);assert.equal(after.volume,before.volume);assert.notEqual((await compose(['ps','--quiet','app'],true,{},true)).stdout.trim(),oldApp);await verifyManaged();
+  });
+  it('rejects missing managed host binds without automatically creating a directory',async()=>{
+    await ensureManaged();const missing=managedDirectory+'-missing';await assert.rejects(compose(['run','--rm','--no-deps','app','node','-e','process.exit(0)'],true,{PORTAL_UPLOADS_HOST_PATH:missing},true));await assert.rejects(stat(missing),(e:any)=>e.code==='ENOENT');
+  });
+  it('rejects aliased legacy/managed host paths before attempting a storage write',async()=>{
+    await ensureManaged();await assert.rejects(compose(['run','--rm','--no-deps','app','node','dist/main.js'],true,{PORTAL_UPLOADS_HOST_PATH:nasDirectory},true),(error:any)=>/separate|overlap/i.test(error.stdout+error.stderr));assert.equal(await readFile(join(nasDirectory,'sentinel.txt'),'utf8'),'pre-existing NAS fixture');await verifyManaged();
   });
 });

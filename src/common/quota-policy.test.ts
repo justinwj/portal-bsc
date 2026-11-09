@@ -36,7 +36,12 @@ it('rejects corrupt stored policy objects without coercing or replacing their va
   assert.throws(()=>validateStorageLimit({mode:'limited',bytes:'-1'}));
 });
 it('includes pending reservations exactly once but excludes verified aborted upload journals',()=>{
-  const {collectUsage}=require('./quota-policy'),base={type:'file',storageScope:'portal-managed',schemaVersion:2,sizeBytes:3,uploadedByUserId:'u'};
-  const report=collectUsage([{...base,_id:'pending',upload:{state:'reserved'}},{...base,_id:'done',upload:{state:'committed'}},{...base,_id:'aborted',upload:{state:'aborted'}}],[{_id:'u',type:'user'}]);
+  const {collectUsage}=require('./quota-policy'),base={type:'file',storageScope:'portal-managed',schemaVersion:2,sizeBytes:3,uploadedByUserId:'u'},upload={reservedBytes:'3',declaredBytes:'3'};
+  const report=collectUsage([{...base,_id:'pending',upload:{...upload,state:'reserved'}},{...base,_id:'done',upload:{...upload,state:'committed'}},{...base,_id:'aborted',upload:{...upload,state:'aborted'}}],[{_id:'u',type:'user'}]);
   assert.equal(report.knownBytes,6n);assert.equal(report.perUser.get('u'),6n);assert.equal(report.complete,true);
+  assert.equal(report.committedBytes,3n);assert.equal(report.reservedBytes,3n);
+});
+it('reports unknown or conflicting upload state and reservation sizes as incomplete',()=>{
+  const {collectUsage}=require('./quota-policy'),base={_id:'a',type:'file',storageScope:'portal-managed',schemaVersion:2,sizeBytes:3,uploadedByUserId:'u',upload:{state:'reserved',reservedBytes:'3',declaredBytes:'3'}};
+  for(const files of [[{...base,upload:{...base.upload,state:'unknown'}}],[{...base,upload:{...base.upload,reservedBytes:'2'}}],[base,{...base,upload:{...base.upload,state:'aborted'}}]])assert.equal(collectUsage(files,[{_id:'u',type:'user'}]).complete,false);
 });

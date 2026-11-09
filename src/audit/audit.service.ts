@@ -17,4 +17,8 @@ export class AuditService {
     await this.couchDbService.logDownload(userId, fileId, fileTitle, ip);
     return this.couchDbService.logAudit('file.download', { fileId, fileTitle }, userId, undefined, ip);
   }
+
+  async logManagedDownloadStart(userId:string,username:string,fileId:string,ownerId:string,ip?:string){
+    return this.couchDbService.logAudit('file.download_started',{fileId,ownerId},userId,username,ip);
+  }
 }

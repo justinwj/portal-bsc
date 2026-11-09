@@ -27,3 +27,8 @@ it('rejects ZIP paths, encrypted entries and executable add-ins independently of
   for(const ext of ['exe','dll','xll','com','js','vbs','ps1','ppa','ppam','xla'])assert.throws(()=>uploadExtension('file.'+ext));
 });
 it('retains text, PDF, JPEG and PNG and permits an empty TXT file',async()=>{await validate('empty.txt',Buffer.alloc(0));await validate('text.txt',Buffer.from('hello'));await validate('file.pdf',Buffer.from('%PDF-1.7'));await validate('file.jpg',Buffer.from('ffd8ffe0','hex'));await validate('file.png',Buffer.from('89504e470d0a1a0a','hex'));await assert.rejects(validate('binary.txt',Buffer.from([0,255])));});
+it('handles legitimate short filesystem reads without rejecting a valid container',async()=>{
+  for(const [name,data]of [['a.xls',compoundDocument()],['a.docm',officePackage('word/document.xml')]] as const){const path=join(directory,randomUUID());await writeFile(path,data);const handle=await open(path,'r');
+    try{const partial={read:(buffer:Buffer,offset:number,length:number,position:number)=>handle.read(buffer,offset,Math.min(17,length),position)};assert.equal(await validateUploadContent(partial as any,data.length,name),'application/octet-stream');}finally{await handle.close();}
+  }
+});

@@ -1,5 +1,7 @@
 # Session 7G-A: proposed managed-upload architecture
 
+Historical design record. Phase 7G-B was subsequently authorized with Office support, selected-recipient sharing and scheduled Synology antivirus amendments. See [the implementation report](development-session-7g-b.md) and [current operations guide](managed-uploads.md); the original design-only status below describes Phase 7G-A, not the later implementation.
+
 **Status: DESIGN ONLY — NOT IMPLEMENTED.** Uploads and upload quota enforcement are not operational. Phase 7G-B requires explicit approval after independent architecture review. No endpoint, package, production configuration, filesystem writer, account record or NAS mount is changed by this proposal.
 
 Reviewed baseline: `8f3ea0644e28e890047799e9bf05212bc8e409aa` on `codex/portal-bsc-r1-fixes`. The working tree contained three staged `.idea` additions and an unrelated untracked `docs/development-session-7c-options.md`; these are outside this work. Instructions were read from `origin/master:AGENTS.md` and `origin/master:.github/copilot-instructions.md`.

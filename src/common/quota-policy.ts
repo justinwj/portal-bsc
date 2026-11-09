@@ -10,6 +10,13 @@ export interface PortalSettings {
 }
 const GB = 1000000000n, MAX = 9007199254740991n;
 const modes = ['not-configured', 'unlimited'];
+export const managedUploadStates = ['reserved','receiving','prepared','committed','cleanup-pending','aborted','quarantined'];
+export function validateManagedCharge(file:FileRecord):string {
+  const upload=(file as any).upload;
+  if(file.schemaVersion!==2||!Number.isSafeInteger(file.sizeBytes)||file.sizeBytes<0||!managedUploadStates.includes(upload?.state)
+    ||upload.reservedBytes!==String(file.sizeBytes)||upload.declaredBytes!==String(file.sizeBytes))throw Error('Invalid managed upload accounting');
+  return upload.state;
+}
 export function defaultPortalSettings(): PortalSettings {
   return { type: 'portal-settings', schemaVersion: 1, maxActiveUsers: { mode: 'not-configured' },
     defaultUserQuota: { mode: 'not-configured' }, globalStorageQuota: { mode: 'not-configured' } };
@@ -69,11 +76,9 @@ export function collectUsage(files: FileRecord[], users: UserRecord[]) {
   const owners = new Set(users.filter(u => u.type === 'user').map(u => u._id));
   const perUser = new Map<string, bigint>(), groups = new Map<string, FileRecord[]>(), warnings: string[] = [];
   let knownBytes = 0n, unattributedBytes = 0n, complete = true, attributionComplete = true, excluded = 0, managedFiles = 0;
+  let committedBytes=0n,reservedBytes=0n;
   for (const file of files) {
     if (!file || file.type !== 'file') continue;
-    // The upload writer marks aborted only after verifying physical cleanup.
-    // All other journal states retain their full reservation charge.
-    if ((file as any).schemaVersion === 2 && (file as any).upload?.state === 'aborted') continue;
     if (typeof file._id !== 'string' || !file._id.trim()) {
       if (file.storageScope == null || file.storageScope === 'external-nas') excluded++;
       else { complete = false; warnings.push('Managed or unclassified metadata has no reliable file ID'); }
@@ -92,12 +97,21 @@ export function collectUsage(files: FileRecord[], users: UserRecord[]) {
       complete = false; warnings.push(`Conflicting duplicate metadata for ${id}`); continue;
     }
     if (!Number.isSafeInteger(first.sizeBytes) || first.sizeBytes < 0) { complete = false; warnings.push(`Unknown or invalid byte size for ${id}`); continue; }
+    let state:string|undefined;
+    if(group.some(f=>f.schemaVersion===2)){
+      try{state=validateManagedCharge(first);if(group.some(f=>validateManagedCharge(f)!==state))throw Error('Conflicting states');}
+      catch{complete=false;warnings.push(`Unknown or conflicting upload accounting for ${id}`);continue;}
+      // Abort is written only after confirmed physical cleanup. Conflicting
+      // duplicate states must be detected before excluding this journal.
+      if(state==='aborted'){managedFiles--;continue;}
+    }
     const bytes = BigInt(first.sizeBytes); knownBytes += bytes;
+    if(state&&state!=='committed')reservedBytes+=bytes;else committedBytes+=bytes;
     if (typeof first.uploadedByUserId === 'string' && owners.has(first.uploadedByUserId)) {
       perUser.set(first.uploadedByUserId, (perUser.get(first.uploadedByUserId) ?? 0n) + bytes);
     } else { unattributedBytes += bytes; attributionComplete = false; warnings.push(`Missing or unknown ownership for ${id}`); }
   }
-  return { knownBytes, perUser, unattributedBytes, complete, attributionComplete, excluded, managedFiles, warnings };
+  return { knownBytes, committedBytes, reservedBytes, perUser, unattributedBytes, complete, attributionComplete, excluded, managedFiles, warnings };
 }
 
 export function limitStatus(limit: StorageLimit, bytes: bigint, complete: boolean): string {

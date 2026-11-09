@@ -1,5 +1,6 @@
 services:
   app:
+    user: "${PORTAL_APP_UID:?Verify the application UID}:${PORTAL_APP_GID:?Verify the application GID}"
     build:
       context: .
       dockerfile: Dockerfile
@@ -15,6 +16,7 @@ services:
       SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET}
       ALLOW_IN_MEMORY_SESSION_STORE: 'false'
       NAS_FILES_DIR: /var/lib/portal-bsc/files
+      NAS_FILES_HOST_PATH: ${NAS_FILES_HOST_PATH:?Set NAS_FILES_HOST_PATH to the existing NAS files directory}
     volumes:
       - type: bind
         source: ${NAS_FILES_HOST_PATH:?Set NAS_FILES_HOST_PATH to the existing NAS files directory}

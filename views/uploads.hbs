@@ -2,7 +2,7 @@
 <p>Uploads are private until you explicitly share with selected approved users. Microsoft Office files, including macro-enabled documents, are untrusted. Never enable macros unless you trust their source.</p>
 <p>Files are not scanned by Portal before download. Scheduled Synology antivirus scanning may occur later.</p>
 <p>Supported extensions: {{extensions}}.</p>
-<form id="upload-form">
+<form id="upload-form" method="POST" action="/uploads/intents">
   <input type="hidden" name="_csrf" value="{{csrfToken}}" />
   <label>File<input type="file" name="file" required /></label>
   <label>Title<input name="title" maxlength="200" required /></label>

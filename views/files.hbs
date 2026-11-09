@@ -18,7 +18,7 @@
           <td><a href="/files/{{this._id}}">{{this.title}}</a></td>
           <td>{{this.category}}</td>
           <td>{{this.mimeType}}</td>
-          <td>{{this.visibility}}</td>
+          <td>{{#if this.accessCategory}}{{this.accessCategory}}{{else}}{{this.visibility}}{{/if}}</td>
           <td><a href="/download/{{this._id}}">Download</a></td>
         </tr>
       {{else}}

@@ -1,4 +1,4 @@
-import { Controller, Get, InternalServerErrorException, Logger, Param, Req, Res, UseGuards } from '@nestjs/common';
+import { Controller, Get, InternalServerErrorException, Logger, Param, Req, Res, ServiceUnavailableException, UseGuards } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { Transform } from 'stream';
 import { pipeline } from 'stream/promises';
@@ -18,7 +18,11 @@ export class FilesController {
 
   @Get('download/:id')
   async download(@Req() req: Request & { session?: any }, @Param('id') id: string, @Res() res: Response) {
-    const allowedFile = await this.filesService.getFileForDownload(id, req.session.user);
+    const allowedFile = await this.filesService.getFileForDownload(id, req.session.user,{ip:req.ip,userAgent:req.get?.('user-agent')});
+    if(allowedFile.schemaVersion===2){
+      try{await this.auditService.logManagedDownloadStart(req.session.user.id,req.session.user.username,id,allowedFile.uploadedByUserId,req.ip);}
+      catch{throw new ServiceUnavailableException('Download auditing is unavailable; the file was not sent');}
+    }
     const fileStream = await this.filesService.readFileStream(allowedFile);
 
     try {
@@ -34,6 +38,7 @@ export class FilesController {
       });
       await pipeline(fileStream.stream, exactLength, res);
     } catch {
+      this.filesService.noteDownloadFailure(allowedFile);
       fileStream.stream.destroy();
       if (res.headersSent || res.destroyed) {
         if (!res.destroyed) res.destroy();

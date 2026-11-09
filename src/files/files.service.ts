@@ -5,6 +5,7 @@ import { isAbsolute, relative, resolve, sep } from 'path';
 import { CouchDbService, FileRecord } from '../common/couchdb.service';
 import { SessionUser, UserRole } from '../common/roles';
 import { ManagedStorage } from './managed-storage.service';
+import { createHash } from 'node:crypto';
 
 @Injectable()
 export class FilesService {
@@ -12,15 +13,17 @@ export class FilesService {
   constructor(private readonly couchDbService: CouchDbService, @Optional() private readonly managed?:ManagedStorage) {}
 
   private isManaged(file:FileRecord){return file.schemaVersion!==undefined||file.accessModel!==undefined||file._id?.startsWith('upload-');}
+  noteDownloadFailure(file:FileRecord){if(this.isManaged(file))this.managed?.invalidate();}
+  private presented(file:FileRecord,user:SessionUser){return this.isManaged(file)?{...file,accessCategory:file.uploadedByUserId===user.id?(file.sharedWithUserIds?.length?'Shared':'Private'):(user.role===UserRole.ADMIN?'Administrator':'Shared')}:file;}
   private async canRead(file: FileRecord, user: SessionUser) {
     if(this.isManaged(file))return !!this.managed&&this.managed.canRead(file,user);
     return file.visibility === 'public' || (Array.isArray(file.allowedRoles) && file.allowedRoles.includes(user.role));
   }
 
-  async listFilesForUser(user: SessionUser) {
+  async listFilesForUser(user: SessionUser,context:{ip?:string;userAgent?:string}={}) {
     const files = await this.couchDbService.listFiles();
     const visible:FileRecord[]=[];
-    for(const file of files)if(await this.canRead(file,user)){if(this.isManaged(file))await this.managed!.auditAdministratorRead(file,user);visible.push(file);}
+    for(const file of files)if(await this.canRead(file,user)){if(this.isManaged(file))await this.managed!.auditAdministratorRead(file,user,context);visible.push(this.presented(file,user));}
     return visible;
   }
 
@@ -51,18 +54,18 @@ export class FilesService {
     return this.couchDbService.createFile(record);
   }
 
-  async getFileForDownload(fileId: string, user: SessionUser) {
+  async getFileForDownload(fileId: string, user: SessionUser,context:{ip?:string;userAgent?:string}={}) {
     const file = await this.getById(fileId);
     if (!file) {
       throw new NotFoundException('File not found');
     }
 
     if (!await this.canRead(file, user)) {
-      throw new NotFoundException('File not available to your role');
+      throw new NotFoundException(this.isManaged(file)?'File not found':'File not available to your role');
     }
 
-    if(this.isManaged(file))await this.managed!.auditAdministratorRead(file,user);
-    return file;
+    if(this.isManaged(file))await this.managed!.auditAdministratorRead(file,user,context);
+    return this.presented(file,user);
   }
 
   private storedName(name: unknown): string {
@@ -76,7 +79,8 @@ export class FilesService {
   }
 
   getSecureFilePath(file: FileRecord) {
-    return resolve(this.storageRoot ?? (process.env.NAS_FILES_DIR || './data/files'), this.storedName(file.storedFilename));
+    const root=this.isManaged(file)?this.managed!.objectsRoot:(this.storageRoot ?? (process.env.NAS_FILES_DIR || './data/files'));
+    return resolve(root, this.storedName(file.storedFilename));
   }
 
   private async validateStorageRoot() {
@@ -140,11 +144,20 @@ export class FilesService {
       if (finalPath !== canonical) throw new NotFoundException('Stored file not available');
       const size = Number(opened.size);
       if(managed&&(opened.nlink!==1n||size!==file.sizeBytes))throw new Error('Managed file integrity mismatch');
+      if(managed){
+        // Verify before HTTP headers. A hash check only after sending the last
+        // Content-Length byte is too late to prevent a misleading 200 response.
+        const hash=createHash('sha256');
+        for await(const chunk of handle.createReadStream({autoClose:false,start:0,...(size?{end:size-1}:{})}))hash.update(chunk);
+        const checked=await handle.stat({bigint:true});
+        if(hash.digest('hex')!==file.sha256||checked.size!==opened.size||checked.mtimeNs!==opened.mtimeNs||checked.ctimeNs!==opened.ctimeNs)throw new Error('Managed file integrity mismatch');
+      }
       if (!Number.isSafeInteger(size) || size < 0) throw new Error('Unsupported file size');
-      stream = handle.createReadStream({ autoClose: true, ...(size ? { end: size - 1 } : {}) });
+      stream = handle.createReadStream({ autoClose: true, start:0, ...(size ? { end: size - 1 } : {}) });
       await this.waitForFirstRead(stream);
       return { stream, size };
     } catch (error: any) {
+      this.noteDownloadFailure(file);
       if (stream) stream.destroy();
       else await handle?.close();
       if (error instanceof NotFoundException) throw error;

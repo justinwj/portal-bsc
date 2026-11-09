@@ -32,13 +32,15 @@ The privileged `seed:admin:prod` CLI retains its established behavior. It may cr
 
 Bootstrap can therefore leave the count **Over capacity**. The page reports that state; ordinary growth remains blocked. Increase the maximum or review eligible account status explicitly. A maximum below the current count cannot be resaved even if it came from a previous policy; resolve capacity first. No users are silently disabled to reconcile it. Existing lockouts still require a separately approved recovery procedure; no local administrator records were repaired in this development session.
 
-## Storage policy: configuration/reporting only in 7F
+## Storage policy and managed-upload enforcement
 
 The default quota applies when a user has no individual override. An override takes precedence, including an explicit Unlimited or Not configured override. Enter **`inherit`** in an override field to remove it and use the current default. Removal is stored as null (equivalent to absent) so a merged CouchDB user document cannot retain a stale override. Quota edits preserve identity, role, active status, password and session version; only quota metadata/update time changes.
 
 The global storage policy applies independently to all known Portal-managed file usage, including retained files owned by disabled or Closed accounts. Lowering a storage policy below known usage is permitted and displays **Over limit**. It does not remove data or block existing downloads.
 
-**Upload quota enforcement is not implemented.** The [Session 7G-A architecture proposal](development-session-7g-design.md) describes reservations and commit-time checks for independent review; Phase 7G-B implementation requires explicit approval. This is not a limit on the whole DS925+, a Synology share, filesystem free space or direct SMB writes. It is not a disk-capacity or filesystem-integrity scanner.
+Session 7G-B adds opt-in managed uploads with durable reservations and commit-time policy/account checks. See [Managed uploads, sharing and recovery](managed-uploads.md) for setup and failure semantics. Existing installations require explicit administrator confirmation; recommended initial policies are **10 GB per user, 100 GB globally and 1 GB per upload**. These are decimal GB, and existing configured policies/overrides are preserved. Both applicable global and user policies must be configured; Not configured blocks uploads, while Unlimited is an explicit choice. The per-file numeric maximum is separately adjustable on **Managed storage policy**.
+
+This is not a limit on the whole DS925+, a Synology share or direct SMB writes. Physical free-space preflight provides additional headroom but does not reserve disk capacity against other NAS writers. No existing NAS directory is made writable.
 
 ### Usage accounting
 
@@ -48,8 +50,9 @@ The global storage policy applies independently to all known Portal-managed file
 - Invalid/unsafe sizes, missing IDs, conflicting duplicate sizes/owners or storage classifications, and unknown scopes make totals incomplete. The display gives known lower-bound bytes and warnings; unknown data is not asserted to use zero bytes.
 - Global byte completeness and ownership completeness are distinct. If global sizes are complete, missing ownership does not change the global byte sum. Incomplete attribution makes per-user totals conservative lower bounds. Numeric remaining bytes become Unknown when the relevant metadata is incomplete.
 - Over-limit is definitive when even the known lower bound exceeds the policy. Otherwise an incomplete report cannot prove that a user is within quota.
+- Schema-v2 upload journals distinguish committed bytes from reserved/uncertain work. Only verified-aborted journals release their charges; cleanup-pending, quarantined and uncertain states remain charged. Reports show committed and reserved components separately. Sharing does not duplicate storage or charge recipients.
 
-Metadata may be stale after out-of-band file changes. SMB data and unmarked legacy NAS entries are outside Portal control. The future upload producer must assign trustworthy scope, owner, size and identity metadata and handle concurrent commit enforcement; no such writer or enforcement path is added in 7F.
+Metadata may be stale after out-of-band file changes. SMB data and unmarked legacy NAS entries are outside Portal control. The managed upload producer assigns scope, owner, size, storage identity and a recoverable journal; admission fails closed on incomplete accounting, unknown managed provenance or inconsistent physical state. Older manually populated managed metadata is not automatically migrated/adopted. Startup and verified downloads check hashes; this is not a scanner for all NAS data.
 
 ## Persistence and auditing
 
@@ -69,4 +72,4 @@ Automated HTTP, CouchDB, container and Windows tooling checks do not operate Rid
 4. Review a managed-metadata fixture with unknown ownership or size. Capture warnings and lower-bound/Unknown reporting. Do not use production NAS files as fixtures.
 5. Confirm member/anonymous denial and native form keyboard access. Check layout/labels at narrow widths and with assistive technology. No interactive Rider, visual or accessibility pass is claimed by the automated report.
 
-See [Session 7F evidence](development-session-7f.md). Uploads, SMTP, permanent deletion and distributed coordination remain outside this session.
+See [Session 7F evidence](development-session-7f.md) for the original policy implementation and [Session 7G-B evidence](development-session-7g-b.md) for uploads. SMTP, permanent deletion and distributed coordination remain outside the implementation.

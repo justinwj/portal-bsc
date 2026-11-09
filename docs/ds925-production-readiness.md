@@ -2,6 +2,8 @@
 
 These are requirements for a future, separately approved deployment. Session 4 did not connect to or deploy on the DS925+. CI verified the production image and Compose stack using disposable resources, not the NAS.
 
+Session 7G-B adds separately mounted managed uploads. Follow [Managed uploads, sharing and recovery](managed-uploads.md) for provisioning, explicit quota confirmation, owner-selected sharing, scheduled Antivirus Essential scanning and backup/restore checks. The legacy NAS mount below remains read-only. Actual DSM paths, identities, ACLs and installed Compose compatibility still require Justin's target-side verification; no NAS deployment is authorized by the development report.
+
 ## Credentials and environment
 
 Keep the real `.env` outside source control, with access limited to the deployment operator. `.env.example` intentionally leaves secrets blank; it is not a runnable production configuration until they are supplied.
@@ -25,6 +27,9 @@ Use a stable Compose project name, for example `portal-bsc`, so future container
 | Named volume `couchdb_data` (normally `portal-bsc_couchdb_data` for that project) | `/opt/couchdb/data` | Retain through restarts/recreation; back up and protect this volume |
 | Repository `couchdb/single-node.ini` | `/opt/couchdb/etc/local.d/20-portal-single-node.ini` | Read-only configuration mount; make the file readable by the container user |
 | Required `NAS_FILES_HOST_PATH`, e.g. `/volume1/docker/portal-bsc/files` | `/var/lib/portal-bsc/files` | Existing approved directory, read-only bind, automatic host-path creation disabled |
+| Opt-in required `PORTAL_UPLOADS_HOST_PATH` | `/var/lib/portal-bsc/uploads` | Separate existing persistent root, writable only for Portal-managed storage, marker UUID required, automatic creation disabled |
+
+The application image now defaults to a non-root user. Production Compose requires explicit verified `PORTAL_APP_UID` and `PORTAL_APP_GID`; do not assume the image's default UID matches a DSM identity. Give that identity read/search access to legacy files, read/search on the managed root and marker, and restrictive write access to managed subdirectories only. Keep host paths canonical and non-overlapping, outside the application checkout. See the managed-upload guide before selecting the optional Compose override.
 
 The example `/volume1` paths must be adapted to the actual NAS storage layout. Do not assume a named Docker volume lives in that shared folder: inspect its mount information through Container Manager/Docker and arrange backups for its actual storage location.
 
@@ -126,6 +131,6 @@ Retain `COUCHDB_USER`, `COUCHDB_PASSWORD`, and `SESSION_SECRET` in protected run
 
 CI proved initialization, records surviving CouchDB restart and container recreation with the same retained volume, retrieval through fresh application services, administrator bootstrap inside the production image, and login/file-list rendering after the app restarted. Cleanup retained the named volume and verified that it still existed.
 
-This does not establish NAS filesystem durability under power loss, backups/restores, storage migration, DSM configuration, TLS operation, or multi-node resilience. The 29 previously reported dependency vulnerabilities remain for separate investigation.
+This does not establish NAS filesystem durability under power loss, backup restorability, storage migration, DSM configuration, TLS operation, or multi-node resilience. Later dependency remediation is documented in the Session 7A–7C reports; current audit evidence is recorded in [Session 7G-B](development-session-7g-b.md), rather than inheriting the historical 29-finding count.
 
 References: [CouchDB single-node setup](https://docs.couchdb.org/en/stable/setup/single-node.html), [official image user/permissions](https://github.com/apache/couchdb-docker/blob/main/3.5.3/Dockerfile), [Docker Compose volumes](https://docs.docker.com/reference/compose-file/volumes/).

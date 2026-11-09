@@ -9,6 +9,7 @@
   </dl>
   <a class="button" href="/download/{{file._id}}">Secure download</a>
   {{#if (eq file.schemaVersion 2)}}
+    <p>Access: {{file.accessCategory}}</p>
     <p>Untrusted uploaded content. Scheduled Synology scanning does not guarantee scanning before download. Portal does not certify this file as clean.</p>
     {{#if (eq file.uploadedByUserId user.id)}}<p><a href="/files/{{file._id}}/sharing">Manage sharing</a></p>{{/if}}
   {{/if}}
