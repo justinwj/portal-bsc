@@ -2,7 +2,9 @@ import 'reflect-metadata';
 import assert from 'node:assert/strict';
 import { randomUUID, createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile, link, symlink, stat } from 'node:fs/promises';
+import { promises as filesystem } from 'node:fs';
+import { mock } from 'node:test';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ValidationPipe } from '@nestjs/common';
@@ -16,6 +18,7 @@ import { CouchDbService } from '../common/couchdb.service';
 import { FilesService } from './files.service';
 import { attachCsrfToken, csrfMiddleware } from '../common/csrf';
 import { configureViews } from '../common/views';
+import { ManagedStorage } from './managed-storage.service';
 
 // Only the external database is replaced. Routes, guards, sessions, CSRF,
 // validation, filesystem operations and streamed HTTP bodies are real.
@@ -23,6 +26,7 @@ class UploadStore {
   users = new Map<string, any>(); files = new Map<string, any>(); docs = new Map<string, any>(); audits: any[] = [];
   settings: any = { type:'portal-settings',schemaVersion:1,maxActiveUsers:{mode:'unlimited'},defaultUserQuota:{mode:'limited',bytes:'10000000000'},globalStorageQuota:{mode:'limited',bytes:'100000000000'} };
   failRead = false; failWrite = false; failAudit = false;
+  afterWrite?: (database:string,document:any)=>void;
   async listUsers(){return structuredClone([...this.users.values()]);}
   async findUserById(id:string){return structuredClone(this.users.get(id)??null);}
   async findUserByUsername(name:string){return (await this.listUsers()).find(u=>u.username===name)??null;}
@@ -35,7 +39,7 @@ class UploadStore {
   async putDocument(database:string,doc:any){
     if(this.failWrite)throw Error('private-db-write');const map=database==='portal_files'?this.files:this.docs,current=map.get(doc._id);
     if(current?._rev!==doc._rev)throw Object.assign(Error('conflict'),{statusCode:409});
-    const next={...structuredClone(doc),_rev:String(Number(current?._rev??0)+1)};map.set(doc._id,next);return structuredClone(next);
+    const next={...structuredClone(doc),_rev:String(Number(current?._rev??0)+1)};map.set(doc._id,next);this.afterWrite?.(database,next);return structuredClone(next);
   }
   async logAudit(event:string,details:any,userId?:string,username?:string,ip?:string){if(this.failAudit)throw Error('private-audit');const e={event,details,userId,username,ip,createdAt:new Date().toISOString()};this.audits.push(e);return e;}
 }
@@ -49,11 +53,11 @@ describe('managed upload admission and streaming HTTP',{concurrency:false},()=>{
     await writeFile(join(managed,'.portal-storage.json'),JSON.stringify({schemaVersion:1,id:process.env.PORTAL_UPLOADS_STORAGE_ID}));
     store=new UploadStore();const hash=await bcrypt.hash(password,4);for(const role of ['owner','member','admin'])store.users.set(role,{_id:role,type:'user',username:role,email:`${role}@example.test`,role:role==='admin'?'admin':'member',isActive:true,passwordHash:hash,sessionVersion:0});
     app=await NestFactory.create<NestExpressApplication>({module:AppModule,providers:[{provide:CouchDbService,useValue:store}]},{logger:false,abortOnError:false});
-    app.use(session({secret:randomUUID(),resave:false,saveUninitialized:false,store:new session.MemoryStore()}));app.use(express.urlencoded({extended:false}));app.use(attachCsrfToken);app.use(csrfMiddleware);configureViews(app);
+    app.use(session({secret:randomUUID(),resave:false,saveUninitialized:false,cookie:{maxAge:3600000},store:new session.MemoryStore()}));app.use(express.urlencoded({extended:false}));app.use(attachCsrfToken);app.use(csrfMiddleware);configureViews(app);
     app.useGlobalPipes(new ValidationPipe({whitelist:true,forbidNonWhitelisted:true,transform:true}));
     await app.get(FilesService).initializeStorage();await app.listen(0,'127.0.0.1');url=await app.getUrl();
   });
-  afterEach(async()=>{await app?.close();if(root)await rm(root,{recursive:true,force:true});for(const k of Object.keys(process.env))if(!(k in original))delete process.env[k];Object.assign(process.env,original);});
+  afterEach(async()=>{mock.restoreAll();await app?.close();if(root)await rm(root,{recursive:true,force:true});for(const k of Object.keys(process.env))if(!(k in original))delete process.env[k];Object.assign(process.env,original);});
   function browser(){let cookie='';return {get cookie(){return cookie;},async request(path:string,body?:any,method=body===undefined?'GET':'POST',csrf?:string){
     const raw=Buffer.isBuffer(body);const r=await fetch(url+path,{method,headers:{cookie,...(body!==undefined?{'content-type':raw?'application/octet-stream':'application/json'}:{}),...(csrf===undefined?{}:{'x-csrf-token':csrf})},body:body===undefined?undefined:raw?new Uint8Array(body):JSON.stringify(body),redirect:'manual'});
     if(r.headers.get('set-cookie'))cookie=r.headers.get('set-cookie')!.split(';')[0];return{status:r.status,headers:r.headers,body:await r.text()};
@@ -87,4 +91,64 @@ describe('managed upload admission and streaming HTTP',{concurrency:false},()=>{
   it('rejects disguised executable content and never exposes it as an Office document',async()=>{await confirm();const a=await actor(),r=await intent(a,4,'report.docm');assert.equal(r.status,201);const id=JSON.parse(r.body).id;assert.equal((await a.client.request(`/uploads/${id}/content`,Buffer.from('MZ!!'),'PUT',a.csrf)).status,400);assert.equal(store.files.get(id).upload.state,'aborted');});
   it('revalidates quota changes before finalization',async()=>{await confirm();const a=await actor(),r=await intent(a),id=JSON.parse(r.body).id;store.settings.globalStorageQuota={mode:'limited',bytes:'2'};assert.equal((await a.client.request(`/uploads/${id}/content`,Buffer.from('abc'),'PUT',a.csrf)).status,409);assert.notEqual(store.files.get(id).upload.state,'committed');});
   it('fails closed on durable metadata errors without leaking internal details',async()=>{await confirm();const a=await actor();store.failRead=true;const r=await intent(a);assert.equal(r.status,503);assert.doesNotMatch(r.body,/private-db|portal-upload-test/);assert.equal(store.files.size,0);});
+  it('never removes an existing destination after a promotion collision',async()=>{
+    await confirm();const a=await actor(),r=await intent(a),id=JSON.parse(r.body).id,file=store.files.get(id),target=join(process.env.PORTAL_UPLOADS_DIR!,'objects',file.storedFilename);
+    await writeFile(target,'unrelated collision sentinel');assert.equal((await a.client.request(`/uploads/${id}/content`,Buffer.from('abc'),'PUT',a.csrf)).status,503);assert.equal(await readFile(target,'utf8'),'unrelated collision sentinel');assert.notEqual(store.files.get(id).upload.state,'aborted');
+  });
+  it('never removes a pre-existing staging entry when exclusive creation fails',async()=>{
+    await confirm();const a=await actor(),r=await intent(a),id=JSON.parse(r.body).id,file=store.files.get(id),target=join(process.env.PORTAL_UPLOADS_DIR!,'staging',file.storedFilename);
+    await writeFile(target,'existing staging sentinel');assert.equal((await a.client.request(`/uploads/${id}/content`,Buffer.from('abc'),'PUT',a.csrf)).status,503);assert.equal(await readFile(target,'utf8'),'existing staging sentinel');
+  });
+  it('retains a charged reservation after an unlink failure and recovers it after restart',async()=>{
+    await confirm();const a=await actor(),r=await intent(a,4),id=JSON.parse(r.body).id,storage=app.get(ManagedStorage);
+    mock.method(filesystem,'unlink',async()=>{throw Object.assign(Error('fixture unlink failure'),{code:'EACCES'});});
+    assert.equal((await a.client.request(`/uploads/${id}/content`,Buffer.from('abc'),'PUT',a.csrf)).status,400);assert.notEqual(store.files.get(id).upload.state,'aborted');mock.restoreAll();
+    await storage.recover();assert.equal(store.files.get(id).upload.state,'aborted');
+  });
+  it('aborts and cleans interrupted known staging work during fresh-service recovery',async()=>{
+    await confirm();const a=await actor(),r=await intent(a),id=JSON.parse(r.body).id,storage:any=app.get(ManagedStorage);let failed=false;
+    mock.method(storage,'checkpoint',async(name:string)=>{if(name==='chunk'&&!failed){failed=true;store.failRead=true;throw Error('simulated abrupt persistence outage');}});
+    assert.equal((await a.client.request(`/uploads/${id}/content`,Buffer.from('abc'),'PUT',a.csrf)).status,503);assert.notEqual(store.files.get(id).upload.state,'aborted');store.failRead=false;mock.restoreAll();await storage.recover();assert.equal(store.files.get(id).upload.state,'aborted');
+    assert.deepEqual(await readdir(join(process.env.PORTAL_UPLOADS_DIR!,'staging')),[]);
+  });
+  it('does not release physical leftovers associated with an already-aborted record',async()=>{
+    await confirm();const a=await actor(),r=await intent(a),id=JSON.parse(r.body).id;store.files.get(id).upload.state='aborted';await writeFile(join(process.env.PORTAL_UPLOADS_DIR!,'staging',store.files.get(id).storedFilename),'unexpected');await assert.rejects(app.get(ManagedStorage).recover());
+  });
+  it('fails admission when an unknown physical object makes accounting incomplete',async()=>{
+    await confirm();await writeFile(join(process.env.PORTAL_UPLOADS_DIR!,'staging',randomUUID()),'unknown bytes');const a=await actor();assert.equal((await intent(a)).status,503);
+  });
+  it('expires unused intents safely without requiring application restart',async()=>{
+    await confirm();store.settings.globalStorageQuota={mode:'limited',bytes:'3'};const a=await actor(),first=await intent(a),id=JSON.parse(first.body).id;store.files.get(id).upload.expiresAt=new Date(Date.now()-1).toISOString();assert.equal((await intent(a)).status,201);assert.equal(store.files.get(id).upload.state,'aborted');
+  });
+  it('does not erase possibly committed bytes when CouchDB accepts a write then loses its acknowledgement',async()=>{
+    await confirm();const a=await actor(),r=await intent(a),id=JSON.parse(r.body).id;let failed=false;store.afterWrite=(db,doc)=>{if(db==='portal_files'&&doc.upload?.state==='committed'&&!failed){failed=true;throw Error('response lost after actual write');}};
+    assert.equal((await a.client.request(`/uploads/${id}/content`,Buffer.from('abc'),'PUT',a.csrf)).status,503);const file=store.files.get(id);assert.equal(file.upload.state,'committed');assert.equal(await readFile(join(process.env.PORTAL_UPLOADS_DIR!,'objects',file.storedFilename),'utf8'),'abc');
+    await app.get(ManagedStorage).recover();assert.equal((await a.client.request(`/uploads/${id}`)).status,200);
+  });
+  it('requires authenticated current sessions again at commit when logout occurs during the stream',async()=>{
+    await confirm();const a=await actor(),r=await intent(a),id=JSON.parse(r.body).id,storage:any=app.get(ManagedStorage);mock.method(storage,'checkpoint',async(name:string)=>{if(name==='prepared')assert.equal((await a.client.request('/logout',{},'POST',a.csrf)).status,302);});
+    assert.equal((await a.client.request(`/uploads/${id}/content`,Buffer.from('abc'),'PUT',a.csrf)).status,403);assert.equal(store.files.get(id).upload.state,'aborted');
+  });
+  it('rechecks account revocation and quota changes after the complete body arrives',async()=>{
+    await confirm();const a=await actor(),r=await intent(a),id=JSON.parse(r.body).id,storage:any=app.get(ManagedStorage);mock.method(storage,'checkpoint',async(name:string)=>{if(name==='prepared'){store.users.get('owner').isActive=false;store.users.get('owner').sessionVersion++;}});
+    assert.equal((await a.client.request(`/uploads/${id}/content`,Buffer.from('abc'),'PUT',a.csrf)).status,403);assert.equal(store.files.get(id).upload.state,'aborted');
+  });
+  it('recovery rejects a wrong storage marker and leaves all records unchanged',async()=>{await confirm();const before=structuredClone([...store.files]);await writeFile(join(process.env.PORTAL_UPLOADS_DIR!,'.portal-storage.json'),JSON.stringify({schemaVersion:1,id:randomUUID()}));await assert.rejects(app.get(ManagedStorage).recover());assert.deepEqual([...store.files],before);});
+  it('does not create a missing production managed-storage directory',async()=>{const missing=join(root,'missing');process.env.PORTAL_UPLOADS_DIR=missing;await assert.rejects(app.get(FilesService).initializeStorage());await assert.rejects(stat(missing),(e:any)=>e.code==='ENOENT');});
+  it('offers recommended quotas only after explicit confirmation on a fresh installation',async()=>{
+    store.settings=null;const a=await actor('admin');assert.equal((await a.client.request('/admin/settings/uploads',{maxUploadGb:'1',confirm:'yes',useRecommended:'yes'},'POST',a.csrf)).status,303);
+    assert.equal(store.settings.defaultUserQuota.bytes,'10000000000');assert.equal(store.settings.globalStorageQuota.bytes,'100000000000');assert.equal(store.docs.get('managed-upload-policy').maxFileBytes,'1000000000');
+  });
+  it('does not overwrite configured quotas when recommended defaults are explicitly requested',async()=>{
+    store.settings.defaultUserQuota={mode:'limited',bytes:'777'};const a=await actor('admin');assert.equal((await a.client.request('/admin/settings/uploads',{maxUploadGb:'1',confirm:'yes',useRecommended:'yes'},'POST',a.csrf)).status,303);assert.equal(store.settings.defaultUserQuota.bytes,'777');assert.equal(store.settings.globalStorageQuota.bytes,'100000000000');
+  });
+  it('rejects a file above the administrator-adjusted per-file maximum with HTTP 413',async()=>{
+    const a=await actor('admin');assert.equal((await a.client.request('/admin/settings/uploads',{maxUploadGb:'0.000000003',confirm:'yes'},'POST',a.csrf)).status,303);const owner=await actor();assert.equal((await intent(owner,4)).status,413);assert.equal(store.files.size,0);
+  });
+  it('retains quota reservations when metadata is corrupt, never guessing zero usage',async()=>{
+    await confirm();const a=await actor(),r=await intent(a),id=JSON.parse(r.body).id;delete store.files.get(id).uploadedByUserId;assert.equal((await intent(a)).status,503);
+  });
+  it('rejects a symlink in the managed directory tree without touching its target',async()=>{
+    const source=join(process.env.PORTAL_UPLOADS_DIR!,'staging');await rm(source,{recursive:true});await symlink(nas,source,process.platform==='win32'?'junction':'dir');await assert.rejects(app.get(FilesService).initializeStorage());assert.equal(await readFile(join(nas,'sentinel.txt'),'utf8'),'legacy unchanged');
+  });
 });

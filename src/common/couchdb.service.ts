@@ -78,6 +78,25 @@ export class CouchDbService {
   private initialized = false;
   private memoryPortalSettings: PortalSettings | null = null;
 
+  // Managed storage always requires a real database, even in development.
+  // A timeout is not absence; async/batch acknowledgement is not durability.
+  async getDocument(database: 'portal_users' | 'portal_files' | 'portal_audit', id: string): Promise<any | null> {
+    if (!this.db) throw new Error('Persistent CouchDB is required for managed storage');
+    try { return await this.db.use(database).get(id); }
+    catch (error: any) { if (error.statusCode === 404) return null; throw error; }
+  }
+
+  async putDocument(database: 'portal_users' | 'portal_files' | 'portal_audit', document: any): Promise<any> {
+    if (!this.db) throw new Error('Persistent CouchDB is required for managed storage');
+    return new Promise((resolve, reject) => this.db.use(database).insert(document, (error: any, result: any, headers: any) => {
+      if (error) return reject(error);
+      if (headers?.statusCode !== 201 || result?.ok !== true || result.id !== document._id || !result.rev) {
+        return reject(new Error('Managed storage write did not receive a durable acknowledgement'));
+      }
+      resolve({ ...document, _rev: result.rev });
+    }));
+  }
+
   constructor() {
     try {
       const connection = couchDbConnection();

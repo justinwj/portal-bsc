@@ -29,6 +29,10 @@ export class UsersService {
     try { return await operation(); } finally { release!(); }
   }
 
+  // Upload admission/finalization uses the same single-instance queue as policy
+  // and account changes. Never acquire this recursively or hold it for a stream.
+  coordinateStorage<T>(operation: () => Promise<T>): Promise<T> { return this.exclusive(operation); }
+
   async createUser(dto: CreateUserDto): Promise<UserRecord> {
     return this.exclusive(async () => { await this.assertActivationCapacity(); return this.createManagedUser(dto); });
   }

@@ -15,13 +15,16 @@ import { UsersController } from './users/users.controller';
 import { UsersService } from './users/users.service';
 import { LifecycleController } from './users/lifecycle.controller';
 import { QuotaController } from './users/quota.controller';
+import { ManagedStorage } from './files/managed-storage.service';
+import { UploadsController } from './files/uploads.controller';
 
 @Module({
   imports: [AppConfigModule],
-  controllers: [AppController, AuthController, FilesController, HealthController, UsersController, LifecycleController, QuotaController],
+  controllers: [AppController, AuthController, FilesController, HealthController, UsersController, LifecycleController, QuotaController, UploadsController],
   providers: [
     CouchDbService,
     FilesService,
+    ManagedStorage,
     UsersService,
     AuthService,
     AuditService,

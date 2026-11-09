@@ -35,3 +35,8 @@ it('rejects corrupt stored policy objects without coercing or replacing their va
   assert.throws(()=>validateStorageLimit({mode:'unlimited',bytes:'5'}));
   assert.throws(()=>validateStorageLimit({mode:'limited',bytes:'-1'}));
 });
+it('includes pending reservations exactly once but excludes verified aborted upload journals',()=>{
+  const {collectUsage}=require('./quota-policy'),base={type:'file',storageScope:'portal-managed',schemaVersion:2,sizeBytes:3,uploadedByUserId:'u'};
+  const report=collectUsage([{...base,_id:'pending',upload:{state:'reserved'}},{...base,_id:'done',upload:{state:'committed'}},{...base,_id:'aborted',upload:{state:'aborted'}}],[{_id:'u',type:'user'}]);
+  assert.equal(report.knownBytes,6n);assert.equal(report.perUser.get('u'),6n);assert.equal(report.complete,true);
+});

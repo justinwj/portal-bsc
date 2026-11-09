@@ -1,0 +1,14 @@
+<h1>Upload a file</h1>
+<p>Uploads are private until you explicitly share with selected approved users. Microsoft Office files, including macro-enabled documents, are untrusted. Never enable macros unless you trust their source.</p>
+<p>Files are not scanned by Portal before download. Scheduled Synology antivirus scanning may occur later.</p>
+<p>Supported extensions: {{extensions}}.</p>
+<form id="upload-form">
+  <input type="hidden" name="_csrf" value="{{csrfToken}}" />
+  <label>File<input type="file" name="file" required /></label>
+  <label>Title<input name="title" maxlength="200" required /></label>
+  <label>Description<textarea name="description" maxlength="2000"></textarea></label>
+  <button type="submit">Upload privately</button>
+</form>
+<p id="upload-status" role="status" aria-live="polite"></p>
+<noscript>Uploading requires JavaScript. Existing downloads remain available.</noscript>
+<script src="/js/uploads.js" defer></script>

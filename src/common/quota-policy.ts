@@ -71,6 +71,9 @@ export function collectUsage(files: FileRecord[], users: UserRecord[]) {
   let knownBytes = 0n, unattributedBytes = 0n, complete = true, attributionComplete = true, excluded = 0, managedFiles = 0;
   for (const file of files) {
     if (!file || file.type !== 'file') continue;
+    // The upload writer marks aborted only after verifying physical cleanup.
+    // All other journal states retain their full reservation charge.
+    if ((file as any).schemaVersion === 2 && (file as any).upload?.state === 'aborted') continue;
     if (typeof file._id !== 'string' || !file._id.trim()) {
       if (file.storageScope == null || file.storageScope === 'external-nas') excluded++;
       else { complete = false; warnings.push('Managed or unclassified metadata has no reliable file ID'); }

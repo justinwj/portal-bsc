@@ -1,0 +1,12 @@
+<h1>Managed storage policy</h1>
+<p>Storage configured: {{policy.configured}}. Upload policy confirmed: {{policy.confirmed}}.</p>
+<p>Recommended initial policies: 10 GB per user, 100 GB globally, 1 GB per file. 1 GB = 1,000,000,000 bytes. Existing configured values are preserved.</p>
+<form method="POST" action="/admin/settings/uploads">
+  <input type="hidden" name="_csrf" value="{{csrfToken}}" />
+  <label>Maximum upload size (GB)<input name="maxUploadGb" value="{{policy.maxUploadGb}}" maxlength="64" required /></label>
+  <label><input type="checkbox" name="useRecommended" value="yes" /> Explicitly apply recommended defaults only to Not configured global/default quotas</label>
+  <label><input type="checkbox" name="confirm" value="yes" required /> I confirm the quota policies and accept scheduled Synology scanning without a pre-download gate</label>
+  <button type="submit">Confirm upload policy</button>
+</form>
+<p>All uploaded files remain untrusted and not scanned by Portal. Synology Antivirus Essential does not scan files larger than 2,048 MB. Increasing the maximum beyond that range requires reviewing that limitation.</p>
+<p><a href="/admin/settings">Capacity and user quotas</a></p>

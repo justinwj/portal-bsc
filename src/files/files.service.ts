@@ -1,14 +1,15 @@
-import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, NotFoundException, Optional } from '@nestjs/common';
 import { constants, promises as fs, ReadStream } from 'fs';
 import { FileHandle } from 'fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'path';
 import { CouchDbService, FileRecord } from '../common/couchdb.service';
 import { SessionUser, UserRole } from '../common/roles';
+import { ManagedStorage } from './managed-storage.service';
 
 @Injectable()
 export class FilesService {
   private storageRoot?: string;
-  constructor(private readonly couchDbService: CouchDbService) {}
+  constructor(private readonly couchDbService: CouchDbService, @Optional() private readonly managed?:ManagedStorage) {}
 
   private canRead(file: FileRecord, user: SessionUser) {
     return file.visibility === 'public' || (Array.isArray(file.allowedRoles) && file.allowedRoles.includes(user.role));
@@ -92,6 +93,7 @@ export class FilesService {
       await fs.mkdir(resolve(process.env.NAS_FILES_DIR || './data/files'), { recursive: true });
     }
     this.storageRoot = await this.validateStorageRoot();
+    await this.managed?.initialize(this.storageRoot);
   }
 
   private waitForFirstRead(stream: ReadStream) {
