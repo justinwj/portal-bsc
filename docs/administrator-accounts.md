@@ -11,6 +11,8 @@ These restrictions apply in the service as well as the interface. Both POST acti
 
 For public registration, Pending Registrations, deletion-request decisions and account audit review, see [Registration and account lifecycle](account-lifecycle.md). These operations share the same mutation queue and preserve the self-disable/last-administrator protections.
 
+Ordinary creation, approval and reactivation also enforce the [active-user capacity policy](capacity-and-quotas.md). Explicit bootstrap preserves its established creation/collision/recovery behavior and can leave the portal over capacity; it does not silently deactivate or promote accounts.
+
 ## Concurrency and deployment boundary
 
 The Release 1 application must run as **one Node application instance with one Nest UsersService singleton**. A shared in-process queue serializes all status transitions, across different target users, and rereads the actor inside the critical section. If two administrators attempt to disable each other, only one can succeed: the losing actor is no longer an active administrator when its queued operation is validated. The queue covers validation, save and the audit attempt, and is released on failure as well as success.

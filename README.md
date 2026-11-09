@@ -14,6 +14,7 @@ Internal file portal for a Synology NAS deployment, with secure server-rendered 
 - CSRF protection for SSR forms with session-backed tokens
 - Pending registration with administrator approval, account-deletion requests and retained-record closure
 - Administrator lockout prevention, session revocation and account-workflow audits
+- Persistent administrator capacity controls and metadata-based storage quota policy/reporting
 - Redis-backed session storage in production mode
 - Audit logging for login success/failure and downloads
 - `/healthz` JSON health endpoint
@@ -66,7 +67,7 @@ The development runner launches only complete, error-free builds, stops on compi
 - `nginx/portal.conf` shows an example upstream service target of `http://app:3000` for Dockerized deployments.
 
 ## Admin bootstrap
-For registration approval, account deletion requests, retained records/files and workflow audits, see [Registration and account lifecycle](docs/account-lifecycle.md). Quotas and uploads remain deferred.
+For registration approval, account deletion requests, retained records/files and workflow audits, see [Registration and account lifecycle](docs/account-lifecycle.md). See [Capacity and quota controls](docs/capacity-and-quotas.md) for active-user enforcement, decimal-GB policy/reporting and the explicit bootstrap exception. Upload enforcement remains deferred to Session 7G.
 
 For disabling and reactivating accounts, administrator lockout prevention, session revocation, audit failures, and the single-instance concurrency boundary, see [Administrator account safety](docs/administrator-accounts.md).
 
