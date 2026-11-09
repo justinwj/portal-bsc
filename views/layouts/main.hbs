@@ -17,6 +17,7 @@
             <a href="/account">Account settings</a>
             {{#if (eq user.role 'admin')}}
               <a href="/admin/users">Users</a>
+              <a href="/admin/settings">Capacity and quotas</a>
             {{/if}}
             <form method="POST" action="/logout" style="display:inline;">
               <input type="hidden" name="_csrf" value="{{csrfToken}}" />

@@ -16,6 +16,7 @@ import { attachCsrfToken, csrfMiddleware } from '../common/csrf';
 import { UsersService } from './users.service';
 
 class LifecycleStore {
+  async getPortalSettings() { return null; }
   users = new Map<string, any>(); audits: any[] = []; files = [{_id:'kept-file', uploadedByUserId:'member', title:'Retained file', visibility:'public'}];
   failAudit = false; failWrite = false;
   async listUsers() { return structuredClone([...this.users.values()]); }

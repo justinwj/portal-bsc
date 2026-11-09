@@ -74,7 +74,9 @@ describe('administrator capacity and storage policy HTTP',{concurrency:false},()
   for(const role of ['anonymous','member','disabled-admin'])it(`rejects ${role} settings reads and writes`,async()=>{
     const a=role==='anonymous'?{client:browser(),csrf:''}:await actor(role==='member'?'member':'admin');
     if(role==='anonymous')a.csrf=token((await a.client.request('/login')).body);if(role==='disabled-admin')store.users.get('admin').isActive=false;
-    const code=role==='member'?403:401;assert.equal((await a.client.request('/admin/settings')).status,code);assert.equal((await settings(a)).status,code);assert.equal(store.settings,null);
+    const code=role==='member'?403:401;assert.equal((await a.client.request('/admin/settings')).status,code);
+    if(role==='disabled-admin')a.csrf=token((await a.client.request('/login')).body);
+    assert.equal((await settings(a)).status,code);assert.equal(store.settings,null);
   });
   for(const csrf of ['','wrong'])it(`requires ${csrf?'valid':'nonempty'} CSRF for policy changes`,async()=>{const a=await actor();assert.equal((await a.client.request('/admin/settings',{...form(),_csrf:csrf})).status,403);assert.equal(store.settings,null);});
   it('rejects unwhitelisted settings metadata and user-role injection',async()=>{const a=await actor();assert.equal((await post(a,'/admin/settings',{...form(),updatedBy:'forged'})).status,400);assert.equal(store.settings,null);});
@@ -109,8 +111,8 @@ describe('administrator capacity and storage policy HTTP',{concurrency:false},()
     store.settings=policy(3);const created=await users.seedAdmin('bootstrap-admin','bootstrap@example.test',password);assert.equal(created.message,'admin-created');assert.equal(store.users.size,4);
     const original=structuredClone(store.users.get('admin'));assert.equal((await users.seedAdmin('admin','changed@example.test','ChangedPassword123')).message,'admin-already-present');assert.deepEqual(store.users.get('admin'),original);
     await assert.rejects(users.seedAdmin('member','member@example.test',password),/collision|not an administrator/i);
-    store.users.get('other-admin').isActive=false;await assert.rejects(users.seedAdmin('other-admin','other-admin@example.test',password),/disabled/);
     const a=await actor();assert.match((await a.client.request('/admin/settings')).body,/over capacity/i);
+    store.users.get('other-admin').isActive=false;await assert.rejects(users.seedAdmin('other-admin','other-admin@example.test',password),/disabled/);
   });
   it('assigns, removes and audits overrides without altering account identity, status or session version',async()=>{
     const a=await actor();await settings(a,'unlimited','2','10');const original=structuredClone(store.users.get('member'));
@@ -124,6 +126,13 @@ describe('administrator capacity and storage policy HTTP',{concurrency:false},()
   it('distinguishes explicit Not configured overrides from inherited defaults',async()=>{
     const a=await actor();await settings(a,'unlimited','2');await post(a,'/admin/settings/users/member/quota',{quotaGb:'not-configured'});
     assert.deepEqual(store.users.get('member').storageQuotaOverride,{mode:'not-configured'});assert.match((await a.client.request('/admin/settings')).body,/Individual override/);
+  });
+  it('renders a working CSRF token in each individual override form',async()=>{
+    const a=await actor(),page=await a.client.request('/admin/settings');
+    const form=/<form method="POST" action="\/admin\/settings\/users\/member\/quota">([\s\S]*?)<\/form>/.exec(page.body)?.[1];assert.ok(form);
+    const csrf=token(form);assert.equal(csrf,a.csrf);
+    assert.equal((await a.client.request('/admin/settings/users/member/quota',{quotaGb:'0.5',_csrf:csrf})).status,303);
+    assert.equal(store.users.get('member').storageQuotaOverride.bytes,'500000000');
   });
   it('rejects invalid overrides, absent accounts and non-user policy documents',async()=>{
     const a=await actor();assert.equal((await post(a,'/admin/settings/users/member/quota',{quotaGb:'-1'})).status,400);

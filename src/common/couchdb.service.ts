@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { UserRole } from './roles';
 import { couchDbConnection } from '../config/couchdb.configuration';
+import type { PortalSettings, StorageLimit } from './quota-policy';
 
 const nano = require('nano');
 
@@ -18,6 +19,7 @@ export interface UserRecord {
   registration?: { status: 'pending' | 'approved' | 'rejected'; requestedAt: string; decidedAt?: string; decidedBy?: string };
   deletionRequests?: { id: string; status: 'pending' | 'approved' | 'rejected'; requestedAt: string; decidedAt?: string; decidedBy?: string }[];
   closedAt?: string;
+  storageQuotaOverride?: StorageLimit | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -36,6 +38,9 @@ export interface FileRecord {
   visibility: 'public' | 'private';
   allowedRoles: UserRole[];
   uploadedByUserId: string;
+  // Existing NAS records remain outside Portal-managed accounting unless
+  // explicitly classified by a future approved upload/metadata workflow.
+  storageScope?: 'portal-managed' | 'external-nas';
   createdAt: string;
   updatedAt: string;
 }
@@ -71,6 +76,7 @@ export class CouchDbService {
   };
   private db?: any;
   private initialized = false;
+  private memoryPortalSettings: PortalSettings | null = null;
 
   constructor() {
     try {
@@ -189,6 +195,22 @@ export class CouchDbService {
     }
     this.inMemory.users.set(user._id, { ...user, updatedAt: new Date().toISOString() });
     return this.inMemory.users.get(user._id)!;
+  }
+
+  async getPortalSettings(): Promise<PortalSettings | null> {
+    if (!this.db) return this.memoryPortalSettings ? structuredClone(this.memoryPortalSettings) : null;
+    try { return await this.db.use('portal_users').get('portal-settings'); }
+    catch (error: any) { if (error.statusCode === 404) return null; throw error; }
+  }
+
+  async savePortalSettings(settings: PortalSettings): Promise<PortalSettings> {
+    if (!this.db) { this.memoryPortalSettings = structuredClone(settings); return structuredClone(settings); }
+    const db = this.db.use('portal_users');
+    let current: any;
+    try { current = await db.get('portal-settings'); }
+    catch (error: any) { if (error.statusCode !== 404) throw error; }
+    await db.insert({ ...settings, _id: 'portal-settings', _rev: current?._rev });
+    return structuredClone(settings);
   }
 
   async listFiles(): Promise<FileRecord[]> {

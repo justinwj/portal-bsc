@@ -1,0 +1,47 @@
+<section class="page-header">
+  <h1>Capacity and storage policy</h1>
+  <p>1 GB = 1,000,000,000 bytes. Limits are stored as exact integer bytes.</p>
+  <p>Storage is metadata-only reporting for explicitly Portal-managed files. Existing NAS files and direct SMB writes are outside this accounting. Upload limits are not enforced until Session 7G; files are never changed to meet a quota.</p>
+</section>
+{{#if saved}}<p role="status">Settings processed. Unchanged submissions make no further changes.</p>{{/if}}
+<section class="card">
+  <h2>Administrator settings</h2>
+  <p>Active approved accounts: {{settings.activeCount}} (including administrators). Maximum: {{settings.maxLabel}}.</p>
+  {{#if settings.overCapacity}}<p role="alert">Over capacity following explicit bootstrap or an external change. Existing users were not disabled. Increase capacity or explicitly review eligible account status.</p>{{/if}}
+  <p>Default quota: {{settings.defaultLabel}}. Global storage limit: {{settings.globalLabel}}.</p>
+  <p>Enter <code>not-configured</code> for Not configured, <code>unlimited</code> for Unlimited, or a nonnegative number. Active users require an integer; GB supports up to 9 fractional digits. No exponents, separators or leading zeros.</p>
+  <form method="POST" action="/admin/settings">
+    <input type="hidden" name="_csrf" value="{{csrfToken}}" />
+    <label>Maximum active users<input name="maxActiveUsers" value="{{settings.maxInput}}" maxlength="64" required /></label>
+    <label>Default per-user quota (GB)<input name="defaultUserQuotaGb" value="{{settings.defaultInput}}" maxlength="64" required /></label>
+    <label>Global Portal-managed storage limit (GB)<input name="globalStorageGb" value="{{settings.globalInput}}" maxlength="64" required /></label>
+    <button type="submit">Save portal policy</button>
+  </form>
+  {{#if settings.updatedAt}}<p>Last changed: <time>{{settings.updatedAt}}</time>. Administrator ID: {{settings.updatedBy}}.</p>{{/if}}
+</section>
+<section class="card">
+  <h2>Global managed usage</h2>
+  <p>Global known managed bytes: {{settings.globalBytes}} ({{settings.globalGb}} GB). Distinct managed file IDs: {{settings.managedFiles}}.</p>
+  <p>{{settings.globalStatus}}. Remaining bytes: {{settings.globalRemaining}}.</p>
+  <p>Legacy or external metadata excluded: {{settings.excluded}}.</p>
+  <p>Unattributed known bytes: {{settings.unattributedBytes}}.</p>
+  {{#if settings.incomplete}}<p role="alert">Incomplete metadata: known bytes are a lower bound. Unknown sizes are not treated as zero usage; remaining capacity may be Unknown.</p>{{/if}}
+  {{#if settings.incompleteAttribution}}<p role="alert">Incomplete attribution: unowned or unknown-owner bytes are not assigned to any administrator or guessed user. Per-user totals are lower bounds.</p>{{/if}}
+  <ul>{{#each settings.warnings}}<li>{{this}}</li>{{/each}}</ul>
+</section>
+<section class="card">
+  <h2>Applicable user quotas</h2>
+  <p>An Individual override takes precedence. Enter <code>inherit</code> to remove an override and use the Default quota. Explicit Not configured and Unlimited are separate policies.</p>
+  {{#each settings.users}}
+  <article>
+    <h3>{{username}}</h3><p>{{role}} — {{status}}. {{source}}: {{effective}}.</p>
+    <p>Known bytes: {{knownBytes}} ({{knownGb}} GB). {{usageStatus}}. Remaining bytes: {{remaining}}.</p>
+    {{#if incomplete}}<p>Per-user accounting is incomplete; these are known lower-bound bytes.</p>{{/if}}
+    <form method="POST" action="/admin/settings/users/{{id}}/quota">
+      <input type="hidden" name="_csrf" value="{{../csrfToken}}" />
+      <label>Quota override (GB) for {{username}}<input name="quotaGb" value="{{input}}" maxlength="64" required /></label>
+      <button type="submit">Save quota for {{username}}</button>
+    </form>
+  </article>
+  {{/each}}
+</section>

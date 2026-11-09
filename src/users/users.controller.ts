@@ -33,8 +33,8 @@ export class UsersController {
 
   @Post('users')
   async createUser(@Req() req: Request & { session?: any }, @Body() dto: CreateUserDto, @Res() res: Response) {
-    await this.usersService.createUser(dto);
-    return res.redirect('/admin/users');
+    try { await this.usersService.createUser(dto); return res.redirect('/admin/users'); }
+    catch (error) { return this.statusError(error, req, res); }
   }
 
   @Get('users/:id/disable')

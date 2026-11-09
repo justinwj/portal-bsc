@@ -3,10 +3,12 @@ import * as bcrypt from 'bcrypt';
 import { randomUUID } from 'node:crypto';
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
-import { CreateUserDto, RegistrationDto } from '../common/dto/common.dto';
+import { CreateUserDto, PortalSettingsDto, RegistrationDto } from '../common/dto/common.dto';
 import { accountStatus, isAccessibleAccount } from '../common/account-state';
 import { CouchDbService, UserRecord } from '../common/couchdb.service';
 import { UserRole } from '../common/roles';
+import { parseCountLimit, parseStorageLimit, policyValues, storageLabel } from '../common/quota-policy';
+import { QuotaService } from './quota.service';
 
 export interface AccountRequestContext { ip?: string; userAgent?: string }
 
@@ -16,7 +18,8 @@ export class UsersService {
   // One Nest singleton serializes identity reservation, workflow decisions and
   // status changes, including fresh actor validation across all target accounts.
   private mutationQueue: Promise<void> = Promise.resolve();
-  constructor(private readonly couchDbService: CouchDbService) {}
+  private readonly quotas: QuotaService;
+  constructor(private readonly couchDbService: CouchDbService) { this.quotas = new QuotaService(couchDbService); }
 
   private async exclusive<T>(operation: () => Promise<T>): Promise<T> {
     const previous = this.mutationQueue;
@@ -27,7 +30,7 @@ export class UsersService {
   }
 
   async createUser(dto: CreateUserDto): Promise<UserRecord> {
-    return this.exclusive(() => this.createManagedUser(dto));
+    return this.exclusive(async () => { await this.assertActivationCapacity(); return this.createManagedUser(dto); });
   }
 
   private async createManagedUser(dto: CreateUserDto): Promise<UserRecord> {
@@ -59,7 +62,8 @@ export class UsersService {
   }
 
   async findById(id: string) {
-    return this.couchDbService.findUserById(id);
+    const user = await this.couchDbService.findUserById(id);
+    return user?.type === 'user' ? user : null;
   }
 
   private async requireAdministrator(actingAdminId?: string) {
@@ -84,7 +88,7 @@ export class UsersService {
   private async validateStatusChange(userId: string, isActive: boolean, actingAdminId?: string) {
     if (typeof isActive !== 'boolean') throw new BadRequestException('Account status must be a boolean');
     const actor = await this.requireAdministrator(actingAdminId);
-    const user = await this.couchDbService.findUserById(userId);
+    const user = await this.findById(userId);
     if (!user) throw new NotFoundException('User not found');
     if (isActive && (user.closedAt || (user.registration && user.registration.status !== 'approved'))) {
       throw new ConflictException('Pending, rejected or closed accounts cannot be enabled through ordinary user management');
@@ -107,6 +111,7 @@ export class UsersService {
       // actor after its guard ran but before it obtains the status lock.
       const { actor, user } = await this.validateStatusChange(userId, isActive, actingAdminId);
       if (user.isActive === isActive) return { user, changed: false };
+      if (isActive) await this.assertActivationCapacity();
       const next = { ...user, isActive, updatedAt: new Date().toISOString(),
         // Rotate on enable too: a legacy disabled record may still have old
         // version-zero cookies that were never presented while disabled.
@@ -187,6 +192,7 @@ export class UsersService {
       if (!user.registration || user.closedAt) throw new ConflictException('This account has no pending registration');
       if (user.registration.status === state) return;
       if (user.registration.status !== 'pending') throw new ConflictException('Registration already has a different decision');
+      if (state === 'approved') await this.assertActivationCapacity();
       await this.saveWorkflow({ ...user, role: UserRole.MEMBER, isActive: state === 'approved', sessionVersion: (user.sessionVersion ?? 0) + 1,
         registration: { ...user.registration, status: state, decidedBy: actor._id, decidedAt: new Date().toISOString() } },
       `registration.${state}`, actor, 'pending', state, context);
@@ -237,6 +243,60 @@ export class UsersService {
       createdAt: e.createdAt, previousStatus: e.details?.previousStatus, newStatus: e.details?.newStatus })) };
   }
 
+  private async assertActivationCapacity() {
+    const policy = await this.quotas.load();
+    if (policy.maxActiveUsers.mode === 'limited' && (await this.listUsers()).filter(isAccessibleAccount).length >= policy.maxActiveUsers.count) {
+      throw new ConflictException('Active-user capacity has been reached. Disable an eligible account or increase the maximum before activating another account.');
+    }
+  }
+
+  async administratorSettings(actingAdminId: string) {
+    await this.requireAdministrator(actingAdminId);
+    try { return this.quotas.snapshot(await this.quotas.load(), await this.listUsers(), await this.couchDbService.listFiles()); }
+    catch (error) {
+      if (error instanceof ServiceUnavailableException) throw error;
+      throw new ServiceUnavailableException('Quota settings or usage metadata could not be read. No zero-usage fallback was applied.');
+    }
+  }
+
+  async updatePortalSettings(dto: PortalSettingsDto, actingAdminId: string, context: AccountRequestContext = {}) {
+    return this.exclusive(async () => {
+      const actor = await this.requireAdministrator(actingAdminId), current = await this.quotas.load();
+      const next = { type: 'portal-settings' as const, schemaVersion: 1 as const,
+        maxActiveUsers: parseCountLimit(dto.maxActiveUsers), defaultUserQuota: parseStorageLimit(dto.defaultUserQuotaGb),
+        globalStorageQuota: parseStorageLimit(dto.globalStorageGb) };
+      const count = (await this.listUsers()).filter(isAccessibleAccount).length;
+      if (next.maxActiveUsers.mode === 'limited' && next.maxActiveUsers.count < count) throw new ConflictException('The active-user maximum cannot be below the current number of active approved accounts');
+      if (JSON.stringify(policyValues(current)) === JSON.stringify(policyValues(next))) return;
+      try { await this.couchDbService.savePortalSettings({ ...next, updatedAt: new Date().toISOString(), updatedBy: actor._id }); }
+      catch { throw new ServiceUnavailableException('Unable to save portal settings. Check storage availability and persisted state before retrying.'); }
+      try { await this.couchDbService.logAudit('portal.settings_changed', { previous: policyValues(current), next: policyValues(next), userAgent: context.userAgent?.slice(0, 256) }, actor._id, actor.username, context.ip); }
+      catch {
+        this.logger.error('Portal settings saved but settings audit persistence failed');
+        throw new ServiceUnavailableException('Portal settings changed, but the audit record could not be saved. Contact an operator; retrying will not recreate the missing event.');
+      }
+    });
+  }
+
+  async updateUserQuota(userId: string, value: string, actingAdminId: string, context: AccountRequestContext = {}) {
+    return this.exclusive(async () => {
+      const actor = await this.requireAdministrator(actingAdminId), user = await this.findById(userId);
+      if (!user) throw new NotFoundException('User not found');
+      const previous = user.storageQuotaOverride ?? null, next = value === 'inherit' ? null : parseStorageLimit(value);
+      if (JSON.stringify(previous) === JSON.stringify(next)) return;
+      // Explicit null means removal/inheritance. saveUser merges retained fields;
+      // deleting a property from a partial document would leave the old override.
+      try { await this.couchDbService.saveUser({ ...user, storageQuotaOverride: next, updatedAt: new Date().toISOString() }); }
+      catch { throw new ServiceUnavailableException('Unable to save the user quota. Check storage availability and persisted state before retrying.'); }
+      try { await this.couchDbService.logAudit('user.quota_changed', { targetUserId: user._id, targetUsername: user.username, previous, next,
+        previousStatus: previous ? storageLabel(previous) : 'Inherited default', newStatus: next ? storageLabel(next) : 'Inherited default', userAgent: context.userAgent?.slice(0, 256) }, actor._id, actor.username, context.ip); }
+      catch {
+        this.logger.error('User quota saved but quota audit persistence failed');
+        throw new ServiceUnavailableException('User quota changed, but the audit record could not be saved. Contact an operator; retrying will not recreate the missing event.');
+      }
+    });
+  }
+
   async promoteToAdmin(userId: string) {
     const user = await this.couchDbService.findUserById(userId);
     if (!user) {
@@ -271,7 +331,9 @@ export class UsersService {
       return { ...existing, message: 'admin-already-present' };
     }
 
-    const created = await this.createUser(dto);
+    // Preserve explicit bootstrap/recovery creation policy. Capacity applies to
+    // ordinary management, approval and reactivation, not this privileged CLI.
+    const created = await this.exclusive(() => this.createManagedUser(dto));
     const verified = await this.couchDbService.findUserById(created._id!);
     if (!verified || verified.username !== username || verified.role !== UserRole.ADMIN || !verified.isActive) {
       throw new Error('Created administrator could not be verified in CouchDB');

@@ -14,10 +14,11 @@ import { HealthController } from './health/health.controller';
 import { UsersController } from './users/users.controller';
 import { UsersService } from './users/users.service';
 import { LifecycleController } from './users/lifecycle.controller';
+import { QuotaController } from './users/quota.controller';
 
 @Module({
   imports: [AppConfigModule],
-  controllers: [AppController, AuthController, FilesController, HealthController, UsersController, LifecycleController],
+  controllers: [AppController, AuthController, FilesController, HealthController, UsersController, LifecycleController, QuotaController],
   providers: [
     CouchDbService,
     FilesService,

@@ -22,6 +22,7 @@ type StoredSession = session.SessionData & { user?: SessionUser; csrfToken?: str
 // Only the external database adapter is replaced. The AppModule's controllers,
 // services (including bcrypt), guards, and HTTP middleware all run normally.
 class TemporaryCouchStore {
+  async getPortalSettings() { return null; }
   readonly users = new Map<string, UserRecord>();
   readonly audits: string[] = [];
   readonly additionalFiles = new Map<string, FileRecord>();

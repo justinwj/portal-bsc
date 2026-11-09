@@ -72,3 +72,23 @@ export class RegistrationDto {
   @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).+$/)
   password: string;
 }
+
+export class PortalSettingsDto {
+  @IsString()
+  @MaxLength(64)
+  maxActiveUsers: string;
+
+  @IsString()
+  @MaxLength(64)
+  defaultUserQuotaGb: string;
+
+  @IsString()
+  @MaxLength(64)
+  globalStorageGb: string;
+}
+
+export class UserQuotaDto {
+  @IsString()
+  @MaxLength(64)
+  quotaGb: string;
+}

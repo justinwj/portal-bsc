@@ -17,6 +17,7 @@ import { UsersService } from './users.service';
 
 // External persistence only: clone reads/writes to model detached CouchDB docs.
 class AccountStore {
+  async getPortalSettings() { return null; }
   users = new Map<string, UserRecord>();
   audits: any[] = [];
   failAudit = false;
