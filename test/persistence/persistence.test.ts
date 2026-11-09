@@ -29,6 +29,35 @@ describe('production Compose storage and application container', { concurrency: 
   let volumeName: string;
   let records: { user: any; file: any; audit: any };
   let nasDirectory: string;
+  let quotaConfigured = false;
+
+  async function ensureQuotaPolicy() {
+    await ensureStack();
+    if (quotaConfigured) return;
+    const http = browser('http://127.0.0.1:3000');
+    const login = await http.request('/login');
+    assert.equal((await http.request('/login', { username: 'persistence-admin', password: adminPassword, _csrf: formToken(login.body) })).headers.get('location'), '/');
+    const page = await http.request('/admin/settings');
+    assert.equal(page.status, 200, page.body);
+    const token = formToken(page.body);
+    assert.equal((await http.request('/admin/settings', { maxActiveUsers: '17', defaultUserQuotaGb: '3.5', globalStorageGb: '10', _csrf: token })).status, 303);
+    assert.equal((await http.request(`/admin/settings/users/${records.user._id}/quota`, { quotaGb: '0.5', _csrf: token })).status, 303);
+    quotaConfigured = true;
+  }
+
+  async function verifyQuotaPolicy() {
+    const policy = await client.use('portal_users').get('portal-settings');
+    assert.equal(policy.maxActiveUsers.count, 17);
+    assert.equal(policy.defaultUserQuota.bytes, '3500000000');
+    assert.equal(policy.globalStorageQuota.bytes, '10000000000');
+    assert.equal((await client.use('portal_users').get(records.user._id)).storageQuotaOverride.bytes, '500000000');
+    const fresh = browser('http://127.0.0.1:3000');
+    const page = await fresh.request('/login');
+    await fresh.request('/login', { username: 'persistence-admin', password: adminPassword, _csrf: formToken(page.body) });
+    const settings = await fresh.request('/admin/settings');
+    assert.equal(settings.status, 200, settings.body);
+    assert.match(settings.body, /3\.5/);
+  }
 
   async function compose(args: string[], override = true, environment: NodeJS.ProcessEnv = {}) {
     return exec('docker', ['compose', '--project-name', project, '--env-file', '.env',
@@ -253,5 +282,19 @@ describe('production Compose storage and application container', { concurrency: 
     const files = await http.request('/files');
     assert.equal(files.status, 200, files.body);
     assert.ok(files.body.includes(records.file.title));
+  });
+
+  it('persists administrator quota policy and individual overrides in the production stack', async () => {
+    await ensureQuotaPolicy(); await verifyQuotaPolicy();
+  });
+  it('retains quota policy and overrides after CouchDB and application restart', async () => {
+    await ensureQuotaPolicy(); await compose(['restart', 'couchdb']); await ready(() => client.db.get('portal_users'));
+    await compose(['restart', 'app']); await applicationReady(); await verifyQuotaPolicy();
+  });
+  it('retains quota policy and overrides after container recreation with the same data volume', async () => {
+    await ensureQuotaPolicy(); const before = await dataMount();
+    await compose(['up', '-d', '--no-deps', '--force-recreate', 'couchdb']); await ready(() => client.db.get('portal_users'));
+    const after = await dataMount(); assert.notEqual(after.id, before.id); assert.equal(after.volume, before.volume);
+    await compose(['up', '-d', '--no-deps', '--force-recreate', 'app']); await applicationReady(); await verifyQuotaPolicy();
   });
 });
