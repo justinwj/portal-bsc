@@ -41,6 +41,9 @@ export interface FileRecord {
   // Existing NAS records remain outside Portal-managed accounting unless
   // explicitly classified by a future approved upload/metadata workflow.
   storageScope?: 'portal-managed' | 'external-nas';
+  schemaVersion?: number;
+  accessModel?: string;
+  sharedWithUserIds?: string[];
   createdAt: string;
   updatedAt: string;
 }

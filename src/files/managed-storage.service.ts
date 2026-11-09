@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, HttpException, Injectable, NotFoundException, OnModuleDestroy, PayloadTooLargeException, ServiceUnavailableException } from '@nestjs/common';
 import { constants, promises as fs } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { Request } from 'express';
 import type {} from 'express-session';
@@ -8,6 +9,7 @@ import { CouchDbService } from '../common/couchdb.service';
 import { isAccessibleAccount } from '../common/account-state';
 import { collectUsage, defaultPortalSettings, formatGB, parseStorageLimit, validatePortalSettings, validateStorageLimit } from '../common/quota-policy';
 import { UsersService } from '../users/users.service';
+import { SessionUser } from '../common/roles';
 import { UploadIntentDto, UploadPolicyDto } from './upload.dto';
 import { uploadExtension, uploadExtensions, validateUploadContent } from './upload-types';
 
@@ -18,6 +20,7 @@ const states = ['reserved','receiving','prepared','committed','cleanup-pending',
 export interface ManagedFile {
   _id:string; _rev?:string; type:'file'; schemaVersion:2; storageScope:'portal-managed'; storageId:string;
   accessModel:'owner-acl-v1'; uploadedByUserId:string; sharedWithUserIds:string[];
+  shareVersions?:Record<string,number>; shareOwnerVersion?:number;
   storedFilename:string; originalFilename:string; title:string; description:string;
   visibility:'private'; allowedRoles:[]; category:'managed'; mimeType:string; sizeBytes:number; sha256:string;
   scanResult:'not-scanned'; createdAt:string; updatedAt:string;
@@ -136,6 +139,32 @@ export class ManagedStorage implements OnModuleDestroy {
     }catch(error){if(error instanceof HttpException)throw error;this.blocked=true;throw this.unavailable();}
   });}
   async status(id:string,userId:string){const doc=await this.document('portal_files',id);if(!doc||doc.uploadedByUserId!==userId)throw new NotFoundException('Upload not found');this.valid(doc);return{id:doc._id,state:doc.upload.state};}
+  async lookup(id:string){return this.document('portal_files',id);}
+  async canRead(file:any,user:SessionUser){
+    if(!this.root||file.schemaVersion!==2)return false;this.valid(file);if(file.upload.state!=='committed')return false;
+    const actor=await this.users.findById(user.id);if(!isAccessibleAccount(actor)||(actor.sessionVersion??0)!==(user.sessionVersion??0))return false;
+    if(file.uploadedByUserId===user.id)return true;
+    const owner=await this.users.findById(file.uploadedByUserId);
+    return isAccessibleAccount(owner)&&file.shareOwnerVersion===(owner.sessionVersion??0)&&file.sharedWithUserIds.includes(user.id)&&file.shareVersions?.[user.id]===(actor.sessionVersion??0);
+  }
+  async auditAdministratorRead(file:any,user:SessionUser){
+    if(user.role!=='admin'||file.uploadedByUserId===user.id)return;
+    try{await this.database.logAudit('file.administrator_access',{fileId:file._id,ownerId:file.uploadedByUserId,authorization:'owner-granted-recipient'},user.id,user.username);}
+    catch{throw this.unavailable();}
+  }
+  async sharingPage(id:string,actorId:string){
+    const actor=await this.account(actorId),file=await this.document('portal_files',id);if(!file||file.uploadedByUserId!==actorId)throw new NotFoundException('File not found');this.valid(file);if(file.upload.state!=='committed')throw new NotFoundException('File not found');
+    const recipients=(await this.users.listUsers()).filter(u=>isAccessibleAccount(u)&&u._id!==actorId).map(u=>({id:u._id,username:u.username,role:u.role,selected:file.sharedWithUserIds.includes(u._id!)&&file.shareOwnerVersion===(actor.sessionVersion??0)&&file.shareVersions?.[u._id!]===(u.sessionVersion??0)}));
+    return{file:{_id:file._id,title:file.title},recipients};
+  }
+  async share(id:string,recipientIds:string[],actorId:string,req:any){return this.users.coordinateStorage(async()=>{
+    const actor=await this.account(actorId),doc=await this.document('portal_files',id);if(!doc||doc.uploadedByUserId!==actorId)throw new NotFoundException('File not found');this.valid(doc);if(doc.upload.state!=='committed')throw new NotFoundException('File not found');
+    const versions:Record<string,number>={};
+    for(const id of recipientIds){const user=await this.users.findById(id);if(!isAccessibleAccount(user)||id===actorId)throw new BadRequestException('Recipients must be other active approved users');Object.defineProperty(versions,id,{value:user.sessionVersion??0,enumerable:true});}
+    if(isDeepStrictEqual(doc.sharedWithUserIds,recipientIds)&&isDeepStrictEqual(doc.shareVersions??{},versions)&&doc.shareOwnerVersion===(actor.sessionVersion??0))return;
+    const previous=[...doc.sharedWithUserIds];doc.sharedWithUserIds=[...recipientIds];doc.shareVersions=versions;doc.shareOwnerVersion=actor.sessionVersion??0;doc.updatedAt=new Date().toISOString();
+    this.event(doc,recipientIds.length?'file.shared':'file.sharing_revoked',actor,req,{previous,next:recipientIds});const saved=await this.save('portal_files',doc);await this.deliver(saved);
+  });}
   protected async checkpoint(_name:string,_file:ManagedFile):Promise<void>{}
   private async liveSession(req:Request&{session?:any},file:ManagedFile){
     if(createHash('sha256').update(req.sessionID).digest('hex')!==file.upload.sessionDigest)throw new ForbiddenException('Use the original current login for this upload');
@@ -171,7 +200,7 @@ export class ManagedStorage implements OnModuleDestroy {
         file!.upload.state='committed';this.event(file!,'file.uploaded',actor,req,{sizeBytes:file!.sizeBytes,sha256:file!.sha256});file=await this.save('portal_files',file!);await this.checkpoint('committed',file!);
         const verified=await this.document('portal_files',id);this.valid(verified);if(verified.upload.state!=='committed'||verified.sha256!==file!.sha256)throw this.unavailable();
       });
-      await this.deliver(file!);return{id,state:'committed'};
+      await this.users.coordinateStorage(()=>this.deliver(file!));return{id,state:'committed'};
     }catch(error){
       await handle?.close().catch(()=>undefined);handle=undefined;
       // A failed acknowledgement may already have committed. Never delete that
@@ -183,9 +212,11 @@ export class ManagedStorage implements OnModuleDestroy {
   }
   private event(file:ManagedFile,event:string,actor:any,req:any,details:any){file.upload.auditOutbox.push({_id:'upload-event-'+randomUUID(),type:'audit',event,userId:actor._id,username:actor.username,ip:req.ip,createdAt:new Date().toISOString(),details:{fileId:file._id,ownerId:file.uploadedByUserId,...details}});}
   private async deliver(file:ManagedFile){
-    for(const event of file.upload.auditOutbox){const existing=await this.document('portal_audit',event._id);if(existing){const {_rev,...data}=existing;if(JSON.stringify(data)!==JSON.stringify(event))throw this.unavailable();}else await this.save('portal_audit',event);}
-    // Keep deterministic delivery evidence in the journal; no second write is
-    // needed after delivery. Repeated recovery checks the same event IDs.
+    if(!file.upload.auditOutbox.length)return;
+    for(const event of file.upload.auditOutbox){const existing=await this.document('portal_audit',event._id);if(existing){const {_rev,...data}=existing;if(!isDeepStrictEqual(data,event))throw this.unavailable();}else await this.save('portal_audit',event);}
+    // Delivery is durable before clearing the outbox. A lost clear response
+    // replays the same IDs; it cannot create duplicate audit records.
+    file.upload.auditOutbox=[];await this.save('portal_files',file);
   }
   private async cleanup(file:ManagedFile){
     await this.roots();this.valid(file);if(file.upload.state==='committed')throw this.unavailable();

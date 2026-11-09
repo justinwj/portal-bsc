@@ -1,0 +1,11 @@
+<h1>Share {{file.title}}</h1>
+<p>Private is the default. Select only approved users who should download this file. Administrators also need your explicit grant; their access is audited. Recipients cannot share onward.</p>
+<p>To revoke all sharing, clear every checkbox and save. Changes apply on subsequent requests. Account status changes invalidate existing grants; renew them after reactivation.</p>
+<form method="POST" action="/files/{{file._id}}/sharing">
+  <input type="hidden" name="_csrf" value="{{csrfToken}}" />
+  <fieldset><legend>Approved recipients</legend>
+    {{#each recipients}}<label><input type="checkbox" name="recipientIds" value="{{id}}" {{#if selected}}checked{{/if}} /> {{username}} ({{role}})</label>{{/each}}
+  </fieldset>
+  <button type="submit">Save selected access</button>
+</form>
+<p><a href="/files/{{file._id}}">Back to file</a></p>

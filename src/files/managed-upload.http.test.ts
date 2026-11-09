@@ -23,7 +23,7 @@ import { ManagedStorage } from './managed-storage.service';
 // Only the external database is replaced. Routes, guards, sessions, CSRF,
 // validation, filesystem operations and streamed HTTP bodies are real.
 class UploadStore {
-  users = new Map<string, any>(); files = new Map<string, any>(); docs = new Map<string, any>(); audits: any[] = [];
+  users = new Map<string, any>(); files = new Map<string, any>(); docs = new Map<string, any>(); audits: any[] = []; downloads:any[]=[];
   settings: any = { type:'portal-settings',schemaVersion:1,maxActiveUsers:{mode:'unlimited'},defaultUserQuota:{mode:'limited',bytes:'10000000000'},globalStorageQuota:{mode:'limited',bytes:'100000000000'} };
   failRead = false; failWrite = false; failAudit = false;
   afterWrite?: (database:string,document:any)=>void;
@@ -42,6 +42,7 @@ class UploadStore {
     const next={...structuredClone(doc),_rev:String(Number(current?._rev??0)+1)};map.set(doc._id,next);this.afterWrite?.(database,next);return structuredClone(next);
   }
   async logAudit(event:string,details:any,userId?:string,username?:string,ip?:string){if(this.failAudit)throw Error('private-audit');const e={event,details,userId,username,ip,createdAt:new Date().toISOString()};this.audits.push(e);return e;}
+  async logDownload(userId:string,fileId:string,fileTitle:string,ip:string){this.downloads.push({userId,fileId,fileTitle,ip});}
 }
 describe('managed upload admission and streaming HTTP',{concurrency:false},()=>{
   let app:NestExpressApplication,store:UploadStore,root:string,nas:string,url:string;
@@ -150,5 +151,49 @@ describe('managed upload admission and streaming HTTP',{concurrency:false},()=>{
   });
   it('rejects a symlink in the managed directory tree without touching its target',async()=>{
     const source=join(process.env.PORTAL_UPLOADS_DIR!,'staging');await rm(source,{recursive:true});await symlink(nas,source,process.platform==='win32'?'junction':'dir');await assert.rejects(app.get(FilesService).initializeStorage());assert.equal(await readFile(join(nas,'sentinel.txt'),'utf8'),'legacy unchanged');
+  });
+  async function share(a:Awaited<ReturnType<typeof actor>>,id:string,recipients:string[]){return a.client.request(`/files/${id}/sharing`,{recipientIds:recipients},'POST',a.csrf);}
+  it('lets the owner list, inspect and download exact managed bytes with safe headers and completed audits',async()=>{
+    await confirm();const a=await actor(),id=await upload(a);const page=await a.client.request(`/files/${id}`);assert.equal(page.status,200,page.body);assert.match(page.body,/Private description/);assert.match((await a.client.request('/files')).body,/Private title/);
+    const r=await a.client.request(`/download/${id}`);assert.equal(r.status,200,r.body);assert.equal(r.body,'abc');assert.equal(r.headers.get('content-length'),'3');assert.match(r.headers.get('content-disposition')!,/^attachment;/);assert.equal(r.headers.get('x-content-type-options'),'nosniff');assert.match(r.headers.get('cache-control')!,/private|no-store/);assert.equal(store.downloads.length,1);assert.equal(store.downloads[0].userId,'owner');
+  });
+  for(const name of ['member','admin'])it(`does not grant ${name} private-file access or metadata by role`,async()=>{
+    await confirm();const owner=await actor(),id=await upload(owner),other=await actor(name);
+    for(const path of [`/files/${id}`,`/download/${id}`]){const r=await other.client.request(path);assert.equal(r.status,404);assert.doesNotMatch(r.body,/Private title|Private description|sample\.txt/);}
+    assert.doesNotMatch((await other.client.request('/files')).body,/Private title/);
+  });
+  it('renders a CSRF-protected owner sharing interface listing only approved active recipients',async()=>{
+    await confirm();store.users.set('pending',{...store.users.get('member'),_id:'pending',username:'hidden-pending',registration:{status:'pending'}});const a=await actor(),id=await upload(a),page=await a.client.request(`/files/${id}/sharing`);assert.equal(page.status,200);assert.equal(token(page.body),a.csrf);assert.match(page.body,/member/);assert.doesNotMatch(page.body,/hidden-pending|passwordHash/);
+  });
+  it('grants only selected recipients and revokes on subsequent listing, details and download requests',async()=>{
+    await confirm();const owner=await actor(),id=await upload(owner),member=await actor('member');assert.equal((await share(owner,id,['member'])).status,303);assert.equal((await member.client.request(`/download/${id}`)).body,'abc');assert.match((await member.client.request('/files')).body,/Private title/);
+    assert.equal((await share(owner,id,[])).status,303);assert.equal((await member.client.request(`/download/${id}`)).status,404);assert.equal((await member.client.request(`/files/${id}`)).status,404);assert.doesNotMatch((await member.client.request('/files')).body,/Private title/);
+    const audits=[...store.docs.values()].filter(d=>d.type==='audit');const events=audits.filter(d=>['file.shared','file.sharing_revoked'].includes(d.event));assert.equal(events.length,2);assert.equal(events[0].userId,'owner');assert.equal(events[0].details.fileId,id);assert.deepEqual(events[0].details.next,['member']);
+  });
+  it('allows administrator downloads only after an explicit owner grant and durable access audit',async()=>{
+    await confirm();const owner=await actor(),id=await upload(owner),admin=await actor('admin');assert.equal((await admin.client.request(`/download/${id}`)).status,404);assert.equal((await share(owner,id,['admin'])).status,303);
+    assert.equal((await admin.client.request(`/download/${id}`)).body,'abc');assert.ok(store.audits.some(a=>a.event==='file.administrator_access'&&a.userId==='admin'&&a.details.fileId===id));
+    store.failAudit=true;const denied=await admin.client.request(`/download/${id}`);assert.equal(denied.status,503);assert.doesNotMatch(denied.body,/Private description|sample\.txt|private-audit/);
+  });
+  it('does not let a recipient or administrator redistribute access',async()=>{
+    await confirm();const owner=await actor(),id=await upload(owner);await share(owner,id,['member','admin']);for(const name of ['member','admin']){const other=await actor(name);assert.equal((await share(other,id,[])).status,404);assert.equal((await other.client.request(`/files/${id}/sharing`)).status,404);}assert.deepEqual(store.files.get(id).sharedWithUserIds,['member','admin']);
+  });
+  it('invalidates recipient grants across disable/reactivate cycles instead of resurrecting old privileges',async()=>{
+    await confirm();const owner=await actor(),id=await upload(owner);assert.equal((await share(owner,id,['member'])).status,303);const member=await actor('member');store.users.get('member').isActive=false;store.users.get('member').sessionVersion++;assert.equal((await member.client.request(`/download/${id}`)).status,401);
+    store.users.get('member').isActive=true;store.users.get('member').sessionVersion++;const fresh=await actor('member');assert.equal((await fresh.client.request(`/download/${id}`)).status,404);assert.equal((await share(owner,id,['member'])).status,303);assert.equal((await fresh.client.request(`/download/${id}`)).status,200);
+  });
+  it('suspends sharing after owner closure while preserving bytes, ownership and quota charge',async()=>{
+    await confirm();const owner=await actor(),id=await upload(owner);assert.equal((await share(owner,id,['member'])).status,303);const member=await actor('member');store.users.get('owner').isActive=false;store.users.get('owner').closedAt=new Date().toISOString();store.users.get('owner').sessionVersion++;
+    assert.equal((await member.client.request(`/download/${id}`)).status,404);assert.equal(store.files.get(id).uploadedByUserId,'owner');assert.equal(await readFile(join(process.env.PORTAL_UPLOADS_DIR!,'objects',store.files.get(id).storedFilename),'utf8'),'abc');
+  });
+  it('does not duplicate physical storage or quota charges when sharing with multiple users',async()=>{
+    await confirm();const owner=await actor(),id=await upload(owner);const path=join(process.env.PORTAL_UPLOADS_DIR!,'objects',store.files.get(id).storedFilename),before=await stat(path);assert.equal((await share(owner,id,['member','admin'])).status,303);assert.equal(store.files.size,1);assert.equal((await stat(path)).ino,before.ino);const a=await actor('admin'),page=await a.client.request('/admin/settings');assert.match(page.body,/Global known managed bytes: 3/);
+  });
+  for(const csrf of [undefined,'wrong'])it(`requires ${csrf??'missing'} sharing CSRF even for the owner`,async()=>{await confirm();const owner=await actor(),id=await upload(owner);assert.equal((await owner.client.request(`/files/${id}/sharing`,{recipientIds:['member']},'POST',csrf)).status,403);assert.deepEqual(store.files.get(id).sharedWithUserIds,[]);});
+  for(const state of ['missing','disabled','pending','closed'])it(`rejects ${state} sharing recipients without changing grants`,async()=>{
+    await confirm();const owner=await actor(),id=await upload(owner);if(state==='missing')store.users.delete('member');if(state==='disabled')store.users.get('member').isActive=false;if(state==='pending')store.users.get('member').registration={status:'pending'};if(state==='closed')store.users.get('member').closedAt='2026-01-01';assert.equal((await share(owner,id,['member'])).status,400);assert.deepEqual(store.files.get(id).sharedWithUserIds,[]);
+  });
+  it('keeps legacy role-based NAS downloads readable through the original read-only boundary',async()=>{
+    store.files.set('legacy',{_id:'legacy',type:'file',title:'Legacy',description:'external',storedFilename:'sentinel.txt',originalFilename:'legacy.txt',visibility:'private',allowedRoles:['member'],mimeType:'text/plain',sizeBytes:16});const member=await actor('member');assert.equal((await member.client.request('/download/legacy')).body,'legacy unchanged');
   });
 });

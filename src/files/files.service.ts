@@ -11,13 +11,17 @@ export class FilesService {
   private storageRoot?: string;
   constructor(private readonly couchDbService: CouchDbService, @Optional() private readonly managed?:ManagedStorage) {}
 
-  private canRead(file: FileRecord, user: SessionUser) {
+  private isManaged(file:FileRecord){return file.schemaVersion!==undefined||file.accessModel!==undefined||file._id?.startsWith('upload-');}
+  private async canRead(file: FileRecord, user: SessionUser) {
+    if(this.isManaged(file))return !!this.managed&&this.managed.canRead(file,user);
     return file.visibility === 'public' || (Array.isArray(file.allowedRoles) && file.allowedRoles.includes(user.role));
   }
 
   async listFilesForUser(user: SessionUser) {
     const files = await this.couchDbService.listFiles();
-    return files.filter((file) => this.canRead(file, user));
+    const visible:FileRecord[]=[];
+    for(const file of files)if(await this.canRead(file,user)){if(this.isManaged(file))await this.managed!.auditAdministratorRead(file,user);visible.push(file);}
+    return visible;
   }
 
   async listAllFiles() {
@@ -25,6 +29,7 @@ export class FilesService {
   }
 
   async getById(id: string) {
+    if(id.startsWith('upload-')&&this.managed)return this.managed.lookup(id);
     return this.couchDbService.findFileById(id);
   }
 
@@ -47,15 +52,16 @@ export class FilesService {
   }
 
   async getFileForDownload(fileId: string, user: SessionUser) {
-    const file = await this.couchDbService.findFileById(fileId);
+    const file = await this.getById(fileId);
     if (!file) {
       throw new NotFoundException('File not found');
     }
 
-    if (!this.canRead(file, user)) {
+    if (!await this.canRead(file, user)) {
       throw new NotFoundException('File not available to your role');
     }
 
+    if(this.isManaged(file))await this.managed!.auditAdministratorRead(file,user);
     return file;
   }
 
@@ -115,12 +121,13 @@ export class FilesService {
     try {
       // Validate the literal name before performing filesystem operations.
       const name = this.storedName(file.storedFilename);
-      this.storageRoot ??= await this.validateStorageRoot();
-      const target = resolve(this.storageRoot, name);
+      const managed=this.isManaged(file);
+      const root=managed?this.managed!.objectsRoot:(this.storageRoot??=await this.validateStorageRoot());
+      const target = resolve(root, name);
       const entry = await fs.lstat(target, { bigint: true });
       if (!entry.isFile() || entry.isSymbolicLink()) throw new NotFoundException('Stored file not available');
       const canonical = await fs.realpath(target);
-      const suffix = relative(this.storageRoot, canonical);
+      const suffix = relative(root, canonical);
       if (!suffix || suffix === '..' || suffix.startsWith(`..${sep}`) || isAbsolute(suffix)) {
         throw new NotFoundException('Stored file not available');
       }
@@ -132,6 +139,7 @@ export class FilesService {
       const finalPath = await fs.realpath(target);
       if (finalPath !== canonical) throw new NotFoundException('Stored file not available');
       const size = Number(opened.size);
+      if(managed&&(opened.nlink!==1n||size!==file.sizeBytes))throw new Error('Managed file integrity mismatch');
       if (!Number.isSafeInteger(size) || size < 0) throw new Error('Unsupported file size');
       stream = handle.createReadStream({ autoClose: true, ...(size ? { end: size - 1 } : {}) });
       await this.waitForFirstRead(stream);

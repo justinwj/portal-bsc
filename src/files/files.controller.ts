@@ -2,6 +2,7 @@ import { Controller, Get, InternalServerErrorException, Logger, Param, Req, Res,
 import { Request, Response } from 'express';
 import { Transform } from 'stream';
 import { pipeline } from 'stream/promises';
+import { createHash } from 'node:crypto';
 import { AuditService } from '../audit/audit.service';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { FilesService } from './files.service';
@@ -24,10 +25,12 @@ export class FilesController {
       res.setHeader('Content-Type', allowedFile.mimeType || 'application/octet-stream');
       res.setHeader('Content-Length', String(fileStream.size));
       res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(allowedFile.originalFilename || allowedFile.title)}"`);
+      const managed=allowedFile.schemaVersion===2,hash=managed?createHash('sha256'):undefined;
+      if(managed){res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Cache-Control','private, no-store');}
       let transferred = 0;
       const exactLength = new Transform({
-        transform(chunk, _encoding, callback) { transferred += chunk.length; callback(null, chunk); },
-        flush(callback) { callback(transferred === fileStream.size ? undefined : new Error('Incomplete file transfer')); },
+        transform(chunk, _encoding, callback) { transferred += chunk.length;hash?.update(chunk);callback(null, chunk); },
+        flush(callback) { callback(transferred === fileStream.size&&(!hash||hash.digest('hex')===allowedFile.sha256) ? undefined : new Error('Incomplete or corrupt file transfer')); },
       });
       await pipeline(fileStream.stream, exactLength, res);
     } catch {
