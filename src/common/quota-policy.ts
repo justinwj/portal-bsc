@@ -71,13 +71,19 @@ export function collectUsage(files: FileRecord[], users: UserRecord[]) {
   let knownBytes = 0n, unattributedBytes = 0n, complete = true, attributionComplete = true, excluded = 0, managedFiles = 0;
   for (const file of files) {
     if (!file || file.type !== 'file') continue;
-    if (file.storageScope == null || file.storageScope === 'external-nas') { excluded++; continue; }
-    if (file.storageScope !== 'portal-managed') { complete = false; warnings.push('Unknown file storage classification'); continue; }
-    if (typeof file._id !== 'string' || !file._id.trim()) { complete = false; warnings.push('Managed metadata has no reliable file ID'); continue; }
+    if (typeof file._id !== 'string' || !file._id.trim()) {
+      if (file.storageScope == null || file.storageScope === 'external-nas') excluded++;
+      else { complete = false; warnings.push('Managed or unclassified metadata has no reliable file ID'); }
+      continue;
+    }
     const group = groups.get(file._id) ?? []; group.push(file); groups.set(file._id, group);
   }
   for (const [id, group] of groups) {
-    managedFiles++;
+    if (group.every(f => f.storageScope == null || f.storageScope === 'external-nas')) { excluded += group.length; continue; }
+    if (group.some(f => f.storageScope === 'portal-managed')) managedFiles++;
+    if (!group.every(f => f.storageScope === 'portal-managed')) {
+      complete = false; warnings.push(`Unknown or conflicting storage classification for ${id}`); continue;
+    }
     const first = group[0];
     if (!group.every(f => Object.is(f.sizeBytes, first.sizeBytes) && f.uploadedByUserId === first.uploadedByUserId)) {
       complete = false; warnings.push(`Conflicting duplicate metadata for ${id}`); continue;

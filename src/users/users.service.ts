@@ -7,7 +7,7 @@ import { CreateUserDto, PortalSettingsDto, RegistrationDto } from '../common/dto
 import { accountStatus, isAccessibleAccount } from '../common/account-state';
 import { CouchDbService, UserRecord } from '../common/couchdb.service';
 import { UserRole } from '../common/roles';
-import { parseCountLimit, parseStorageLimit, policyValues, storageLabel } from '../common/quota-policy';
+import { parseCountLimit, parseStorageLimit, policyValues, storageLabel, StorageLimit, validateStorageLimit } from '../common/quota-policy';
 import { QuotaService } from './quota.service';
 
 export interface AccountRequestContext { ip?: string; userAgent?: string }
@@ -282,7 +282,10 @@ export class UsersService {
     return this.exclusive(async () => {
       const actor = await this.requireAdministrator(actingAdminId), user = await this.findById(userId);
       if (!user) throw new NotFoundException('User not found');
-      const previous = user.storageQuotaOverride ?? null, next = value === 'inherit' ? null : parseStorageLimit(value);
+      let previous: StorageLimit | null;
+      try { previous = user.storageQuotaOverride == null ? null : validateStorageLimit(user.storageQuotaOverride); }
+      catch { throw new ServiceUnavailableException('Existing user quota policy is invalid; no replacement default or update was applied.'); }
+      const next = value === 'inherit' ? null : parseStorageLimit(value);
       if (JSON.stringify(previous) === JSON.stringify(next)) return;
       // Explicit null means removal/inheritance. saveUser merges retained fields;
       // deleting a property from a partial document would leave the old override.

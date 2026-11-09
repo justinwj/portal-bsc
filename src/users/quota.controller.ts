@@ -27,6 +27,6 @@ export class QuotaController {
   }
   private failure(error: unknown,res: Response) {
     if (!(error instanceof HttpException)) throw error;
-    return res.status(error.getStatus()).render('workflow-error',{title:'Settings not changed',error:error.message,returnPath:'/admin/settings'});
+    return res.status(error.getStatus()).render('workflow-error',{title:'Settings request not completed',error:error.message,returnPath:'/admin/settings'});
   }
 }

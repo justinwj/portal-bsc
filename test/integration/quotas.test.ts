@@ -1,6 +1,8 @@
 import 'reflect-metadata';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { beforeEach, afterEach, describe, it } from 'node:test';
 import { CouchDbService } from '../../src/common/couchdb.service';
 import { UsersService } from '../../src/users/users.service';
@@ -56,5 +58,15 @@ describe('real CouchDB/Redis capacity and quota policy',{concurrency:false,timeo
     const a=await actor(),before=await rawSettings();const r=await a.http.request('/admin/settings',{...body('unlimited','-1'),_csrf:a.csrf});assert.equal(r.status,400);assert.deepEqual(await rawSettings(),before);
     const invalid=new URL(dependencyUrl('COUCHDB_URL'));invalid.password='wrong-test-only-password';const previous=process.env.COUCHDB_URL;process.env.COUCHDB_URL=invalid.toString();
     try {await assert.rejects((new CouchDbService() as any).getPortalSettings(),(e:any)=>e.statusCode===401);}finally{process.env.COUCHDB_URL=previous;}
+  });
+  it('preserves explicit production CLI bootstrap at capacity and reports the resulting over-capacity state',async()=>{
+    const a=await actor(),count=(await couch.listUsers()).filter(active).length;
+    assert.equal((await save(a,String(count))).status,303);
+    const bootstrapName=`bootstrap-${randomUUID()}`;
+    const result=await promisify(execFile)(process.execPath,['dist/seed-admin.js'],{timeout:15000,env:{...process.env,NODE_ENV:'production',ADMIN_USERNAME:bootstrapName,ADMIN_EMAIL:`${bootstrapName}@example.test`,ADMIN_PASSWORD:password}});
+    assert.match(result.stdout,/Admin user created:/);const created=await couch.findUserByUsername(bootstrapName);assert.ok(created);assert.equal(created.isActive,true);assert.equal(created.role,UserRole.ADMIN);
+    assert.equal((await couch.listUsers()).filter(active).length,count+1);assert.match((await a.http.request('/admin/settings')).body,/over capacity/i);
+    const repeat=await promisify(execFile)(process.execPath,['dist/seed-admin.js'],{timeout:15000,env:{...process.env,NODE_ENV:'production',ADMIN_USERNAME:bootstrapName,ADMIN_EMAIL:'different@example.test',ADMIN_PASSWORD:'DifferentPassword123'}});
+    assert.match(repeat.stdout,/Admin user already present:/);assert.equal((await couch.findUserById(created._id!))!.passwordHash,created.passwordHash);
   });
 });

@@ -172,6 +172,11 @@ describe('administrator capacity and storage policy HTTP',{concurrency:false},()
     const a=await actor();await settings(a);await settings(a);await post(a,'/admin/settings/users/member/quota',{quotaGb:'1'});await post(a,'/admin/settings/users/member/quota',{quotaGb:'1'});
     assert.equal(store.audits.filter(e=>e.event==='portal.settings_changed').length,1);assert.equal(store.audits.filter(e=>e.event==='user.quota_changed').length,1);
   });
+  it('treats semantically equal stored override JSON as unchanged regardless of key order',async()=>{
+    store.users.get('member').storageQuotaOverride={bytes:'1000000000',mode:'limited'};const original=structuredClone(store.users.get('member')),a=await actor();
+    assert.equal((await post(a,'/admin/settings/users/member/quota',{quotaGb:'1'})).status,303);assert.deepEqual(store.users.get('member'),original);
+    assert.equal(store.audits.filter(e=>e.event==='user.quota_changed').length,0);
+  });
   it('fails policy reads and activation closed on CouchDB errors, without treating errors as Not configured',async()=>{
     const a=await actor();pending();store.failRead=true;assert.equal((await a.client.request('/admin/settings')).status,503);assert.equal((await post(a,approve('pending'),{})).status,503);assert.equal(store.users.get('pending').isActive,false);
   });
@@ -182,6 +187,6 @@ describe('administrator capacity and storage policy HTTP',{concurrency:false},()
     const a=await actor();store.failWrite=true;const r=await settings(a);assert.equal(r.status,503);assert.equal(store.settings,null);assert.doesNotMatch(r.body,/private-write/);
   });
   it('reports settings/audit partial commits honestly and preserves saved settings',async()=>{
-    const a=await actor();store.failAudit=true;const r=await settings(a,'3','1','2');assert.equal(r.status,503);assert.equal(store.settings.maxActiveUsers.count,3);assert.doesNotMatch(r.body,/private-audit/);
+    const a=await actor();store.failAudit=true;const r=await settings(a,'3','1','2');assert.equal(r.status,503);assert.equal(store.settings.maxActiveUsers.count,3);assert.doesNotMatch(r.body,/private-audit|Settings not changed/);
   });
 });

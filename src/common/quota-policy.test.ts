@@ -24,3 +24,14 @@ it('marks invalid metadata incomplete rather than treating unknown sizes as zero
   const {collectUsage}=require('./quota-policy');const report=collectUsage([{_id:'a',type:'file',storageScope:'portal-managed',sizeBytes:-1}],[]);
   assert.equal(report.complete,false);assert.equal(report.knownBytes,0n);assert.ok(report.warnings.length>0);
 });
+it('does not guess a storage classification when duplicate file IDs disagree about managed scope',()=>{
+  const {collectUsage}=require('./quota-policy');const file={_id:'ambiguous',type:'file',storageScope:'portal-managed',sizeBytes:100,uploadedByUserId:'u'};
+  const report=collectUsage([file,{...file,storageScope:'external-nas'}],[{_id:'u',type:'user'}]);
+  assert.equal(report.complete,false);assert.equal(report.knownBytes,0n);assert.ok(report.warnings.length>0);
+});
+it('rejects corrupt stored policy objects without coercing or replacing their values',()=>{
+  const {defaultPortalSettings,validatePortalSettings,validateStorageLimit}=require('./quota-policy');
+  assert.throws(()=>validatePortalSettings({...defaultPortalSettings(),maxActiveUsers:{mode:'limited',count:'3'}}));
+  assert.throws(()=>validateStorageLimit({mode:'unlimited',bytes:'5'}));
+  assert.throws(()=>validateStorageLimit({mode:'limited',bytes:'-1'}));
+});
