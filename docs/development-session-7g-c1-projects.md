@@ -1,6 +1,8 @@
 # Session 7G-C1 extension: engineering, multimedia and ZIP bundles
 
-Starting SHA: `b33d37714c9fa12f00f61de3545f24d431aa3efe`, authorized branch `codex/portal-bsc-r1-fixes`. Status: implementation and local acceptance complete; full GitHub Actions verification pending. No native CAD, Blender, Office, script or multimedia application execution is claimed.
+Starting SHA: `b33d37714c9fa12f00f61de3545f24d431aa3efe`, authorized branch `codex/portal-bsc-r1-fixes`. Status: implementation, local acceptance and full GitHub Actions verification passed. **623 distinct tests / 920 passing executions, zero failed/cancelled/skipped.** No native CAD, Blender, Office, script or multimedia application execution is claimed.
+
+Verified implementation/source SHA: **`6f055536c1bbff2d946bf63310c23c6730657f32`**. Format implementation: `a91388d8ebacf8fceb5534b97e51840234f73eb5`; integration/container tests: `26215ae24f2d70f6b6cd4124ea6b3e7868437c2f`. This completed-evidence publication also removes a blank line at the test file's EOF; runtime code and assertions are unchanged. Its final publication SHA is supplied in the handoff rather than embedding a self-referential hash in its own content.
 
 ## Baseline and scope
 
@@ -50,7 +52,7 @@ References reviewed: [PKWARE ZIP specification](https://pkware.cachefly.net/webd
 
 ## Private supplied-file browser acceptance
 
-Justin identified a private local sample directory. Read originals only; tested copies outside the repository using a fresh loopback-only Chrome profile, actual forms/JavaScript, new isolated real CouchDB/Redis and dedicated managed/legacy volumes. No external file service or browser was used. Dependencies had no host-published ports, the test app was loopback-published with real sessions/no memory fallback, and legacy storage was read-only. The previous Office acceptance volumes and all existing Portal records were untouched. Browser profile external traffic was sent to a closed loopback proxy; no previews/native applications ran.
+Justin identified a private local sample directory. Read originals only; tested copies outside the repository using a fresh loopback-only Chrome profile, actual forms/JavaScript, new isolated real CouchDB/Redis and dedicated managed/legacy volumes. No external file service or browser was used. Dependencies had no host-published ports, the test app was loopback-published with real sessions/no memory fallback, and legacy storage was read-only. The previous Office acceptance volumes and all existing Portal records were untouched. Browser profile external traffic was sent to a closed loopback proxy; no previews/native applications ran. Host Node/npm were 24.22.1/11.19.1; Docker 29.9.2 ran Node **22.23.5**, npm **10.9.9**, app UID/GID **1000:1000**.
 
 **38 supplied files** covering 37 extensions were uploaded/downloaded through the normal browser UI; every file was private, every original/downloaded SHA-256 matched, every suggested download name matched, and originals were rehashed unchanged afterward. Raw hashes, original names/contents, private manifests, browser harness and sample files remain outside Git/GitHub/build contexts. Each following row is pass/private/hash-match/name-match:
 
@@ -90,7 +92,7 @@ Two actual downloaded archives were extracted **on the local workstation only**,
 
 ## Files, verification and remaining review
 
-Local final complete suite: **511 passed, zero failed/cancelled/skipped**. Typecheck, production build, full/production audits and dependency tree each exited 0; both audits reported zero vulnerabilities. Actual local production Docker builds succeeded. The new real-service ZIP crash cases and container-recreation case await GitHub execution; they are not yet claimed passed. Windows CI now explicitly includes the new format suite.
+Local final complete suite: **511 passed, zero failed/cancelled/skipped**. Typecheck, production build, full/production audits and dependency tree each exited 0; both audits reported zero vulnerabilities. Actual local production Docker builds succeeded. Windows CI explicitly includes the new format suite. The EOF whitespace cleanup was followed by a **111/111** format-suite rerun; `git diff --check` against the starting SHA then passed.
 
 The scoped change contains these **14 files**:
 
@@ -111,6 +113,21 @@ test/persistence/persistence.test.ts
 views/uploads.hbs
 ```
 
-No package manifest/lockfile changed. Local private sample files, model/media binaries, ZIPs, extraction results and acceptance helpers are absent from this list and excluded from Git/build contexts. Final commit IDs and completed CI results will be recorded after job inspection. The queued verification includes real ZIP SIGKILL cases before/after CouchDB prepared/commit boundaries and actual ZIP persistence across application/database container recreation, alongside every previous suite.
+No package manifest/lockfile changed. Local private sample files, model/media binaries, ZIPs, extraction results and acceptance helpers are absent from this list and excluded from Git/build contexts.
+
+Completed [GitHub Actions run 43766611867](https://github.com/justinwj/portal-bsc/actions/runs/43766611867), source `6f055536c1bbff2d946bf63310c23c6730657f32`; inspected all successful jobs and test/audit/build summaries:
+
+| Executed suite | Passed | Failed | Cancelled | Skipped |
+| --- | ---: | ---: | ---: | ---: |
+| Linux unit/HTTP/tooling | 511 | 0 | 0 | 0 |
+| Actual Redis/CouchDB integration | 92 | 0 | 0 | 0 |
+| Production Docker/Compose/persistence | 20 | 0 | 0 | 0 |
+| Additional Windows tooling executions | 34 | 0 | 0 | 0 |
+| Additional Windows upload/format executions | 263 | 0 | 0 | 0 |
+| **Total executions** | **920** | **0** | **0** | **0** |
+
+The first three rows cover **623 distinct cases**. This adds 128 distinct cases to the C1 baseline: 111 format, 12 HTTP/warning, four real-service ZIP and one actual-container ZIP persistence case. Existing assertions/suites remain enabled. The ZIP SIGKILL cases executed before/after real CouchDB prepared/commit acknowledgements and verified no duplicate publication/audit. The actual production stack retained ZIP bytes across database/application container recreation with the same data volume and managed bind; the legacy mount remained read-only.
+
+Linux/Windows typecheck and production builds passed; production Docker built and started successfully, including bootstrap regression checks. Full and production security audits/high-critical gate reported **zero critical/high/moderate/low findings**; dependency-tree validation exited 0. No advisory exception, package upgrade, proprietary CI application or security-control bypass was introduced. Session-owned local test services are stopped, dedicated volumes/private copies retained, and staged `.idea` hashes/blob IDs preserved.
 
 No merge, NAS deployment, image publication, backup changes, new antivirus, anonymous sharing, extraction/preview/conversion endpoint or native-code execution. Request independent review of the implementation and the eight deferred Priority 2 extensions before broadening their admission. Preserve private local test artifacts and retained volumes; stop only session-owned services after verification.

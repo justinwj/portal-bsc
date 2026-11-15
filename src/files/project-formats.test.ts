@@ -66,4 +66,3 @@ it('keeps Office family checks intact and rejects generic ZIP renamed to an Offi
 it('does not interpret CSV formulas, Python, SVG, XAML or Rhino lock records as safe executable content',async()=>{
  for(const [ext,data]of [['csv','=HYPERLINK("untrusted")\n'],['py','raise Exception("never execute")\n'],['rhl',''],['svg','<svg onload="untrusted()"/>'],['xaml','<ResourceDictionary/>']] as const)assert.equal(await validate(ext,Buffer.from(data)),'application/octet-stream');
 });
-
