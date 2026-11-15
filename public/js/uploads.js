@@ -3,7 +3,10 @@ const form = document.getElementById('upload-form');
 let running = false;
 let attempt;
 async function uploadResponse(response) {
-  const body = await response.json();
+  if (response.status === 429) throw new Error('Too many requests. Wait before retrying, then check the previous upload status before starting another file.');
+  let body;
+  try { body = await response.json(); }
+  catch { throw new Error('Upload service returned an unexpected response. Check the previous upload status before retrying.'); }
   if (!response.ok) throw new Error(body.message || 'Upload request did not complete. Inspect its status before retrying.');
   return body;
 }

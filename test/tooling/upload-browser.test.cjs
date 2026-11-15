@@ -10,6 +10,14 @@ function browser(fetch) {
   return { submit: () => submit({ preventDefault() {} }), form, status, navigations };
 }
 const response = body => ({ ok: true, status: 200, json: async () => body });
+it('browser explains a plain-text 429 without showing a JSON parser error or retrying automatically', async () => {
+  let requests=0;const client=browser(async()=>{requests++;return{ok:false,status:429,json:async()=>{throw new SyntaxError('Unexpected token in private server text');}};});
+  await client.submit();assert.match(client.status.textContent,/too many requests.*wait/i);assert.doesNotMatch(client.status.textContent,/Unexpected token|private server/);assert.equal(requests,1);assert.equal(client.navigations.length,0);
+});
+it('browser handles a non-JSON service failure without exposing its response body', async () => {
+  const client=browser(async()=>({ok:false,status:502,json:async()=>{throw new SyntaxError('private proxy paths');}}));
+  await client.submit();assert.match(client.status.textContent,/unexpected response.*status/i);assert.doesNotMatch(client.status.textContent,/private proxy/);
+});
 it('browser retries a lost intent acknowledgement with the same idempotency key', async () => {
   const keys = []; let first = true;
   const client = browser(async (url, options) => {
