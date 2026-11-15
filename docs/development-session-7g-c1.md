@@ -1,6 +1,8 @@
 # Session 7G-C1: real document acceptance and TIFF/HEIC support
 
-Starting commit: `507e6b290b76ea867572f46c4788b417dec72879`, branch `codex/portal-bsc-r1-fixes`. Status: local compatibility verification complete; updated GitHub Actions verification pending. **Office application visual checks remain pending at Justin's explicit choice.** Browser/hash acceptance is not a claim that Word, Excel or PowerPoint opened the files.
+Starting commit: `507e6b290b76ea867572f46c4788b417dec72879`, branch `codex/portal-bsc-r1-fixes`. Status: local browser/hash verification and updated full GitHub Actions verification passed. **Office application visual checks remain pending at Justin's explicit choice.** Browser/hash acceptance is not a claim that Word, Excel or PowerPoint opened the files.
+
+Verified source commit: **`41979d37476b9976079e357b7caf36f73428174d`**. Logical changes are TIFF/HEIC support `074321c9e2cfc0b5ee0332e9b329b29e53f44185`, error handling `88b703f2bce926e5100fe55da65367015657fd58`, and the acceptance documentation at `41979d3`. This completed-evidence report is published in a documentation-only descendant; its exact final publication SHA is provided in the handoff, avoiding a self-referential hash inside its own content.
 
 ## Baseline, privacy and isolation
 
@@ -103,4 +105,19 @@ docs/development-session-7g-c1.md
 
 No manifest/lockfile, credentials, account policies, quota settings, NAS mounts or unrelated source changed. Owner files/private manifests/hashes and the local-only DevTools harness are not tracked or sent to GitHub. The managed-storage guide now lists **41 allowed extensions** and describes TIFF/HEIC signature limits.
 
-Updated full GitHub Actions result and final verified source SHA: pending commit/push and completion. Planned counts are not reported as passed. This section will be updated only after inspecting all completed jobs. No merge, deployment or image publication. Preserve disposable data volumes; stop only the session-owned local test services after testing.
+Completed [GitHub Actions run 43697328686](https://github.com/justinwj/portal-bsc/actions/runs/43697328686), source `41979d37476b9976079e357b7caf36f73428174d`: inspected all three successful jobs, test summaries, build/audit and dependency-validation steps.
+
+| Executed suite | Passed | Failed | Cancelled | Skipped |
+| --- | ---: | ---: | ---: | ---: |
+| Linux complete unit/HTTP/tooling | 388 | 0 | 0 | 0 |
+| Actual Redis/CouchDB integration | 88 | 0 | 0 | 0 |
+| Production Docker/Compose/startup/persistence | 19 | 0 | 0 | 0 |
+| Additional Windows tooling executions | 34 | 0 | 0 | 0 |
+| Additional Windows upload/content executions | 140 | 0 | 0 | 0 |
+| **Total executions** | **669** | **0** | **0** | **0** |
+
+The first three rows are **495 distinct cases**; Windows repeats 174 cases. This adds 21 distinct regressions to 7G-B: 16 content validation, three HTTP and two browser-error tests. Local private-document browser checks are additional acceptance evidence, not included in CI counts and not uploaded to CI.
+
+Linux and Windows typechecks/production builds passed. The production Docker image built and the real container stack passed its startup/bootstrap, read-only legacy, managed-write, persistence/recreation and security checks. Full audit, production audit/high-critical gate and `npm ls --all` passed; **zero critical, high, moderate or low npm findings**. No assertions were weakened or suites disabled. `git diff --check` passed. Package manifest/lockfile and existing staged `.idea` blob IDs/hashes were verified unchanged.
+
+Only the session-owned local app/Redis/CouchDB services were stopped after acceptance. The initial test app container was also stopped when replaced by the final image. Private temporary downloads/manifests/profiles and the dedicated test data volumes remain locally retained; they contain owner-provided copies and must not be published, exported to CI or reused as public fixtures. Nothing was merged, deployed to a NAS, published as an image or removed from existing records/storage. Return for independent review; no further development phase begins here.
