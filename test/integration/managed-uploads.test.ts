@@ -12,6 +12,7 @@ import { UserRole } from '../../src/common/roles';
 import { browser, dependencyUrl, formToken, launchApplication, sessionId, within } from './support';
 import { createClient } from 'redis';
 import { officePackage } from '../fixtures/documents';
+import { projectArchive } from '../fixtures/projects';
 const nano=require('nano');
 
 describe('persistent managed uploads using real CouchDB and Redis',{concurrency:false,timeout:90000},()=>{
@@ -52,6 +53,14 @@ describe('persistent managed uploads using real CouchDB and Redis',{concurrency:
     const a=await actor(),id=await upload(a),file=await doc('portal_files',id);assert.equal(file.upload.state,'committed');assert.equal(file.scanResult,'not-scanned');assert.equal(file.sha256,createHash('sha256').update('abc').digest('hex'));assert.equal(await readFile(join(root,'objects',file.storedFilename),'utf8'),'abc');
     await app.close();await start();const fresh=await actor();assert.equal((await fresh.client.request(`/download/${id}`)).body,'abc');
     const events=(await db.use('portal_audit').list({include_docs:true})).rows.map((r:any)=>r.doc).filter((e:any)=>e.event==='file.uploaded'&&e.details.fileId===id);assert.equal(events.length,1);assert.equal(events[0].userId,owner._id);assert.equal(file.upload.auditOutbox.length,0);
+  });
+  it('persists a private project ZIP intact, then shares and revokes after a fresh application startup',async()=>{
+    const a=await actor(),data=projectArchive(),id=await upload(a,data,'engineering.zip');
+    await app.close();await start();const ownerActor=await actor(),recipient=await actor(name+'-member');assert.equal((await recipient.client.request(`/download/${id}`)).status,404);
+    assert.equal((await ownerActor.client.request(`/files/${id}/sharing`,{recipientIds:member._id,_csrf:ownerActor.csrf})).status,303);
+    const r=await fetch(app.url+`/download/${id}`,{headers:{cookie:recipient.client.cookie,'x-forwarded-proto':'https'}});assert.equal(r.status,200);assert.match(r.headers.get('content-disposition')!,/^attachment;/);assert.deepEqual(Buffer.from(await r.arrayBuffer()),data);
+    assert.equal((await ownerActor.client.request(`/files/${id}/sharing`,{_csrf:ownerActor.csrf})).status,303);assert.equal((await recipient.client.request(`/download/${id}`)).status,404);
+    const file=await doc('portal_files',id);assert.equal(file.sizeBytes,data.length);assert.equal(file.uploadedByUserId,owner._id);assert.equal(file.sha256,createHash('sha256').update(data).digest('hex'));
   });
   it('persists selective grants and revocation without duplicate storage or quota charges',async()=>{
     const a=await actor(),id=await upload(a),other=await actor(name+'-member');assert.equal((await other.client.request(`/download/${id}`)).status,404);
@@ -104,6 +113,16 @@ describe('persistent managed uploads using real CouchDB and Redis',{concurrency:
       pending=content(a,id!,Buffer.from('abc')).catch(error=>({transportFailure:error.message}));await within(proxy.ready,10000,'CouchDB commit boundary');app.crash();await app.close();await pending;await proxy.close();
       await start();const file=await doc('portal_files',id!);assert.equal(file.upload.state,point.committed?'committed':'aborted');
       if(point.committed){const current=await actor();assert.equal((await current.client.request(`/download/${id}`)).body,'abc');const audit=(await db.use('portal_audit').list({include_docs:true})).rows.map((r:any)=>r.doc).filter((e:any)=>e.event==='file.uploaded'&&e.details.fileId===id);assert.equal(audit.length,1);}
+      else{await assert.rejects(readFile(join(root,'objects',file.storedFilename)),(e:any)=>e.code==='ENOENT');await assert.rejects(readFile(join(root,'staging',file.storedFilename)),(e:any)=>e.code==='ENOENT');}
+    }finally{await proxy.close();await pending;}
+  });
+  for(const point of [{state:'prepared',after:true,committed:false},{state:'committed',after:false,committed:false},{state:'committed',after:true,committed:true}])it(`recovers project ZIP SIGKILL ${point.after?'after':'before'} durable ${point.state} without duplicate publication`,async()=>{
+    await app.close();const proxy=await gate(point.state,point.after),data=projectArchive();let pending:Promise<any>|undefined;
+    try{
+      await start(proxy.url);const a=await actor(),r=await intent(a,data.length,'recovery.zip');assert.equal(r.status,201);const id=r.id;
+      pending=content(a,id,data).catch(error=>({transportFailure:error.message}));await within(proxy.ready,10000,'Actual ZIP CouchDB commit boundary');app.crash();await app.close();await pending;await proxy.close();
+      await start();const file=await doc('portal_files',id);assert.equal(file.upload.state,point.committed?'committed':'aborted');
+      if(point.committed){const current=await actor(),response=await fetch(app.url+`/download/${id}`,{headers:{cookie:current.client.cookie,'x-forwarded-proto':'https'}});assert.equal(response.status,200);assert.deepEqual(Buffer.from(await response.arrayBuffer()),data);const events=(await db.use('portal_audit').list({include_docs:true})).rows.map((r:any)=>r.doc).filter((e:any)=>e.event==='file.uploaded'&&e.details.fileId===id);assert.equal(events.length,1);}
       else{await assert.rejects(readFile(join(root,'objects',file.storedFilename)),(e:any)=>e.code==='ENOENT');await assert.rejects(readFile(join(root,'staging',file.storedFilename)),(e:any)=>e.code==='ENOENT');}
     }finally{await proxy.close();await pending;}
   });

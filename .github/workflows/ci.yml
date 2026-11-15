@@ -95,7 +95,7 @@ jobs:
       - run: npm ci
       - run: npm run test:tooling
       - name: Windows managed upload, filesystem, sharing and Office-format checks
-        run: node --test --test-reporter=tap --require ts-node/register src/files/managed-upload.http.test.ts src/files/upload-types.test.ts
+        run: node --test --test-reporter=tap --require ts-node/register src/files/managed-upload.http.test.ts src/files/upload-types.test.ts src/files/project-formats.test.ts
       - run: npm run typecheck
       - run: npm run build
       - run: npm audit --json

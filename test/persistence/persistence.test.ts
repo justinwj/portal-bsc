@@ -13,6 +13,7 @@ import { FilesService } from '../../src/files/files.service';
 import { AuditService } from '../../src/audit/audit.service';
 import { UserRole } from '../../src/common/roles';
 import { browser, formToken } from '../integration/support';
+import { projectArchive } from '../fixtures/projects';
 
 const exec = promisify(execFile);
 const nano = require('nano');
@@ -336,6 +337,13 @@ describe('production Compose storage and application container', { concurrency: 
   });
   it('rejects missing managed host binds without automatically creating a directory',async()=>{
     await ensureManaged();const missing=managedDirectory+'-missing';await assert.rejects(compose(['run','--rm','--no-deps','app','node','-e','process.exit(0)'],true,{PORTAL_UPLOADS_HOST_PATH:missing},true));await assert.rejects(stat(missing),(e:any)=>e.code==='ENOENT');
+  });
+  it('retains an intact project ZIP across actual application and CouchDB container recreation',async()=>{
+    await ensureManaged();const a=await managedActor(),data=projectArchive();
+    const intent=await fetch('http://127.0.0.1:3000/uploads/intents',{method:'POST',headers:{cookie:a.http.cookie,'x-forwarded-proto':'https','x-csrf-token':a.csrf,'content-type':'application/json'},body:JSON.stringify({originalFilename:'persistent-project.zip',title:'Persistent project ZIP',description:'Synthetic container acceptance',sizeBytes:String(data.length),idempotencyKey:randomUUID()})});assert.equal(intent.status,201,await intent.clone().text());const {id}=await intent.json() as any;
+    const uploaded=await fetch(`http://127.0.0.1:3000/uploads/${id}/content`,{method:'PUT',headers:{cookie:a.http.cookie,'x-forwarded-proto':'https','x-csrf-token':a.csrf,'content-type':'application/octet-stream'},body:new Uint8Array(data)});assert.equal(uploaded.status,200,await uploaded.text());
+    const before=await dataMount();await compose(['up','-d','--no-deps','--force-recreate','couchdb'],true,{},true);await ready(()=>client.db.get('portal_users'));await compose(['up','-d','--no-deps','--force-recreate','app'],true,{},true);await applicationReady();assert.equal((await dataMount()).volume,before.volume);
+    const fresh=await managedActor(),download=await fetch(`http://127.0.0.1:3000/download/${id}`,{headers:{cookie:fresh.http.cookie,'x-forwarded-proto':'https'}});assert.equal(download.status,200);assert.deepEqual(Buffer.from(await download.arrayBuffer()),data);const record=await client.use('portal_files').get(id);assert.equal(record.upload.state,'committed');assert.equal(record.sizeBytes,data.length);assert.deepEqual(await readFile(join(managedDirectory,'objects',record.storedFilename)),data);
   });
   it('rejects aliased legacy/managed host paths before attempting a storage write',async()=>{
     await ensureManaged();await assert.rejects(compose(['run','--rm','--no-deps','app','node','dist/main.js'],true,{PORTAL_UPLOADS_HOST_PATH:nasDirectory},true),(error:any)=>/separate|overlap/i.test(error.stdout+error.stderr));assert.equal(await readFile(join(nasDirectory,'sentinel.txt'),'utf8'),'pre-existing NAS fixture');await verifyManaged();
