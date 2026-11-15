@@ -5,7 +5,36 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { uploadExtension, validateUploadContent } from './upload-types';
-import { officePackage, compoundDocument } from '../../test/fixtures/documents';
+import { officePackage, compoundDocument, tiffDocument, heicDocument } from '../../test/fixtures/documents';
+for(const ext of ['tif','tiff'])for(const big of [false,true])for(const be of [false,true])it(`accepts ${be?'big':'little'}-endian ${big?'BigTIFF':'TIFF'} .${ext} as download-only bytes`,async()=>{
+  assert.equal(await validate('image.'+ext,tiffDocument(be,big)),'application/octet-stream');
+});
+for(const brand of ['heic','heix','hevc','hevx'])it(`accepts HEVC image container brand ${brand} under .HEIC`,async()=>{
+  assert.equal(await validate('image.HEIC',heicDocument(brand,['mif1',brand])),'application/octet-stream');
+});
+it('recognizes HEIC compatible brands without accepting a generic HEIF or AVIF disguise',async()=>{
+  await validate('image.heic',heicDocument('mif1',['mif1','heic']));
+  for(const data of [heicDocument('mif1',['mif1']),heicDocument('avif',['mif1','avif']),Buffer.from('MZ disguised image')])
+    await assert.rejects(validate('image.heic',data),/content does not match/);
+});
+it('rejects malformed TIFF signatures, unsafe offsets, truncated directories and fake executables',async()=>{
+  const badOffset=tiffDocument();badOffset.writeUInt32LE(0xfffffff0,4);
+  const badCount=tiffDocument();badCount.writeUInt16LE(65535,8);
+  const bigOffset=tiffDocument(false,true);bigOffset.writeBigUInt64LE(0xffffffffffffffffn,8);
+  const wrongBig=tiffDocument(false,true);wrongBig.writeUInt16LE(4,4);
+  for(const data of [Buffer.from('MZ disguised image'),Buffer.from('49492a00','hex'),badOffset,badCount,bigOffset,wrongBig])
+    await assert.rejects(validate('image.tif',data),/content does not match/);
+});
+it('rejects HEIC truncated, overflowing or absent media boxes instead of trusting a brand alone',async()=>{
+  const image=heicDocument(),overflow=Buffer.from(image);overflow.writeUInt32BE(0xffffffff,24);
+  for(const data of [image.subarray(0,24),image.subarray(0,-1),overflow,Buffer.concat([image,Buffer.from([1])])])
+    await assert.rejects(validate('image.heic',data),/content does not match/);
+});
+it('supports a bounded extended-size HEIC media box and an end-of-file media box',async()=>{
+  const image=heicDocument(),extended=Buffer.alloc(17);extended.writeUInt32BE(1);extended.write('mdat',4);extended.writeBigUInt64BE(17n,8);extended[16]=1;
+  await validate('image.heic',Buffer.concat([image.subarray(0,-9),extended]));
+  const last=Buffer.from(image);last.writeUInt32BE(0,last.length-9);await validate('image.heic',last);
+});
 let directory:string;
 before(async()=>{directory=await mkdtemp(join(tmpdir(),'portal-types-'));});after(async()=>{await rm(directory,{recursive:true,force:true});});
 async function validate(name:string,data:Buffer){const path=join(directory,randomUUID());await writeFile(path,data);const handle=await open(path,'r');try{return await validateUploadContent(handle,data.length,name);}finally{await handle.close();}}

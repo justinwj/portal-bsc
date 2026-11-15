@@ -22,6 +22,7 @@ import { attachCsrfToken, csrfMiddleware } from '../common/csrf';
 import { configureViews } from '../common/views';
 import { ManagedStorage } from './managed-storage.service';
 import { UsersService } from '../users/users.service';
+import { tiffDocument, heicDocument } from '../../test/fixtures/documents';
 
 // Only the external database is replaced. Routes, guards, sessions, CSRF,
 // validation, filesystem operations and streamed HTTP bodies are real.
@@ -76,11 +77,17 @@ describe('managed upload admission and streaming HTTP',{concurrency:false},()=>{
   async function intent(a:Awaited<ReturnType<typeof actor>>,bytes=3,name='sample.txt',key=randomUUID()){
     return a.client.request('/uploads/intents',{originalFilename:name,title:'Private title',description:'Private description',sizeBytes:String(bytes),idempotencyKey:key},'POST',a.csrf);
   }
-  async function upload(a:Awaited<ReturnType<typeof actor>>,data=Buffer.from('abc'),name='sample.txt'){
+  async function upload(a:Awaited<ReturnType<typeof actor>>,data:Buffer=Buffer.from('abc'),name='sample.txt'){
     const r=await intent(a,data.length,name);assert.equal(r.status,201,r.body);const id=JSON.parse(r.body).id;
     const done=await a.client.request(`/uploads/${id}/content`,data,'PUT',a.csrf);assert.equal(done.status,200,done.body);return id;
   }
   it('provides an authenticated upload page with CSRF and unscanned/macro warnings',async()=>{const a=await actor();const r=await a.client.request('/uploads');assert.equal(r.status,200);assert.equal(token(r.body),a.csrf);assert.match(r.body,/Office|macro/i);assert.match(r.body,/not.*scanned|unscanned/i);});
+  for(const [ext,data] of [['tif',tiffDocument()],['tiff',tiffDocument(true)],['heic',heicDocument()]] as const)it(`privately streams .${ext} and downloads exact bytes with attachment protections`,async()=>{
+    await confirm();const owner=await actor(),id=await upload(owner,data,'image.'+ext),member=await actor('member');
+    const r=await fetch(url+`/download/${id}`,{headers:{cookie:owner.client.cookie}});
+    assert.equal(r.status,200);assert.match(r.headers.get('content-disposition')!,/^attachment;/);assert.equal(r.headers.get('content-type'),'application/octet-stream');assert.equal(r.headers.get('x-content-type-options'),'nosniff');
+    assert.deepEqual(Buffer.from(await r.arrayBuffer()),data);assert.equal(store.files.get(id).visibility,'private');assert.equal((await member.client.request(`/download/${id}`)).status,404);
+  });
   it('requires explicit administrator confirmation before accepting any reservation',async()=>{const a=await actor();assert.equal((await intent(a)).status,409);assert.equal(store.files.size,0);});
   it('reserves, streams and durably commits an owner-private file with exact bytes and hash',async()=>{
     await confirm();const a=await actor(),id=await upload(a),file=store.files.get(id);assert.equal(file.upload.state,'committed');assert.equal(file.uploadedByUserId,'owner');assert.equal(file.sizeBytes,3);assert.deepEqual(file.sharedWithUserIds,[]);assert.equal(file.sha256,createHash('sha256').update('abc').digest('hex'));assert.equal(file.scanResult,'not-scanned');

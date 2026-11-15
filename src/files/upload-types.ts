@@ -14,7 +14,7 @@ for (const ext of ['pptx', 'pptm', 'ppsx', 'ppsm', 'potx', 'potm'])
 for (const ext of ['vsdx', 'vsdm'])
   zipFamilies[ext] = 'visio/document.xml';
 const compound = ['xls', 'xlt', 'doc', 'dot', 'ppt', 'pps', 'pot', 'vsd', 'mpp', 'pub', 'msg'];
-export const uploadExtensions = [...Object.keys(zipFamilies), ...compound, 'accdb', 'mdb', 'one', 'onepkg', 'txt', 'pdf', 'jpg', 'jpeg', 'png'].sort();
+export const uploadExtensions = [...Object.keys(zipFamilies), ...compound, 'accdb', 'mdb', 'one', 'onepkg', 'txt', 'pdf', 'jpg', 'jpeg', 'png', 'tif', 'tiff', 'heic'].sort();
 export function uploadExtension(name: string): string {
   if (typeof name !== 'string' || !name || name.length > 200 || name.trim() !== name
     || Buffer.from(name, 'utf8').toString('utf8') !== name
@@ -75,6 +75,51 @@ async function officeZip(handle: FileHandle, size: number, extension: string) {
   if (!['xlsm', 'xltm', 'xlam', 'xlsb', 'docm', 'dotm', 'pptm', 'ppsm', 'potm', 'vsdm'].includes(extension) && [...names].some(n => /vbaproject\.bin$/i.test(n)))
     throw Error('Macro content requires a macro-enabled extension');
 }
+async function tiffSignature(handle: FileHandle, head: Buffer, size: number) {
+  const order = head.subarray(0, 2).toString('ascii');
+  if (!['II', 'MM'].includes(order) || head.length < 8) throw Error('Invalid TIFF header');
+  const u16 = (b: Buffer, p: number) => order === 'II' ? b.readUInt16LE(p) : b.readUInt16BE(p);
+  const u32 = (b: Buffer, p: number) => order === 'II' ? b.readUInt32LE(p) : b.readUInt32BE(p);
+  const u64 = (b: Buffer, p: number) => order === 'II' ? b.readBigUInt64LE(p) : b.readBigUInt64BE(p);
+  const version = u16(head, 2), big = version === 43;
+  if (version !== 42 && !big) throw Error('Unknown TIFF version');
+  if (big && (head.length < 16 || u16(head, 4) !== 8 || u16(head, 6) !== 0)) throw Error('Invalid BigTIFF header');
+  const offset = big ? u64(head, 8) : BigInt(u32(head, 4));
+  const countSize = big ? 8 : 2, entrySize = big ? 20n : 12n, nextSize = big ? 8n : 4n;
+  if (offset < (big ? 16n : 8n) || offset % (big ? 8n : 2n) || offset + BigInt(countSize) > BigInt(size)) throw Error('Invalid TIFF directory');
+  const countBytes = await bytes(handle, countSize, Number(offset));
+  const count = big ? u64(countBytes, 0) : BigInt(u16(countBytes, 0));
+  if (!count || offset + BigInt(countSize) + count * entrySize + nextSize > BigInt(size)) throw Error('Truncated TIFF directory');
+}
+async function heicSignature(handle: FileHandle, size: number) {
+  let position = 0, boxes = 0, branded = false, metadata = false, media = false;
+  while (position < size) {
+    if (++boxes > 4096) throw Error('Too many media boxes');
+    const head = await bytes(handle, Math.min(16, size - position), position);
+    if (head.length < 8) throw Error('Truncated media box');
+    const kind = head.subarray(4, 8).toString('ascii'), declared = head.readUInt32BE(0);
+    const headerSize = declared === 1 ? 16 : 8;
+    if (head.length < headerSize) throw Error('Truncated extended media box');
+    const length = declared === 1 ? head.readBigUInt64BE(8) : BigInt(declared || size - position);
+    if (length < BigInt(headerSize) || length > BigInt(size - position)) throw Error('Invalid media box size');
+    if (!position) {
+      if (kind !== 'ftyp' || length < BigInt(headerSize + 8) || length > 4096n || (length - BigInt(headerSize + 8)) % 4n) throw Error('Invalid HEIC file type');
+      const type = await bytes(handle, Number(length) - headerSize, position + headerSize);
+      const brands = [type.subarray(0, 4).toString('ascii')];
+      for (let i = 8; i < type.length; i += 4) brands.push(type.subarray(i, i + 4).toString('ascii'));
+      branded = brands.some(brand => ['heic', 'heix', 'hevc', 'hevx'].includes(brand));
+    } else if (kind === 'ftyp') throw Error('Duplicate file type');
+    if (kind === 'meta') {
+      const version = await bytes(handle, 4, position + headerSize);
+      if (length < BigInt(headerSize + 4) || version.length !== 4 || version.readUInt32BE(0) !== 0) throw Error('Invalid image metadata');
+      metadata = true;
+    }
+    if (kind === 'moov' && length > BigInt(headerSize)) metadata = true;
+    if (kind === 'mdat' && length > BigInt(headerSize)) media = true;
+    position += Number(length);
+  }
+  if (!branded || !metadata || !media) throw Error('Missing HEVC image structure');
+}
 export async function validateUploadContent(handle: FileHandle, size: number, name: string): Promise<string> {
   const ext = uploadExtension(name), head = await bytes(handle, Math.min(512, size), 0);
   try {
@@ -98,6 +143,12 @@ export async function validateUploadContent(handle: FileHandle, size: number, na
     else if (ext === 'onepkg') {
       if (head.subarray(0, 4).toString('ascii') !== 'MSCF' || size < 36)
         throw Error();
+    }
+    else if (ext === 'tif' || ext === 'tiff') {
+      await tiffSignature(handle, head, size);
+    }
+    else if (ext === 'heic') {
+      await heicSignature(handle, size);
     }
     else if (ext === 'pdf') {
       if (!head.subarray(0, 5).equals(Buffer.from('%PDF-')))
