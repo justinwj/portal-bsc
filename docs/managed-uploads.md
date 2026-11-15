@@ -98,6 +98,8 @@ Recognizers use bounded headers, lengths or container directories where possible
 
 Priority 2 review remains for `.cd`, `.gf`, `.pm`, `.udo`, `.gdf`, `.xgl` (ambiguous/vendor variants) and `.nwd`, `.nwc` (Navisworks formats needing reviewed version/signature coverage). These are not silently admitted as arbitrary binary data. Identify the originating application and supply sanitized representative files before broadening admission. Files such as `.bin`, `.mtl`, `.FCStd` and README `.md` in a project can be carried intact **inside a ZIP**; their presence in a sample set does not add them to direct-upload policy.
 
+After testing supplied proprietary samples, Justin explicitly chose **Keep NWD/NWC deferred; use ZIP for now**. The supplied Rhino `.3dm`, DWG and SketchUp files passed direct browser round-trips; NWD/NWC remain rejected as direct uploads but passed intact inside a client-created ZIP. This is not native Navisworks validity or encryption-status certification. See [proprietary sample acceptance](development-session-7g-c1-proprietary.md).
+
 ### ZIP project bundles
 
 Create the project archive **on your workstation**, including textures, materials, binary buffers, drawings and documentation while preserving relative paths. Upload the completed `.zip` through the ordinary form. It is stored unchanged as one private managed object, charged once to its owner and global usage by its actual archive byte size, and can be selectively shared/revoked. Recipients download the original bytes and extract locally with trusted tools. Portal neither creates/recompresses archives nor extracts, previews, executes or fetches referenced resources. ZIP support does not create anonymous links or bypass quotas, sessions, audit/recovery controls.
