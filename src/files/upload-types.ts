@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { FileHandle } from 'node:fs/promises';
 import { extname } from 'node:path';
+import { projectExtensions, validateProject } from './project-formats';
 // Documents are transported, never executed or unpacked. These are container
 // signature checks, not proof of application validity or absence of malware.
 const zipFamilies: Record<string, string> = {};
@@ -14,7 +15,7 @@ for (const ext of ['pptx', 'pptm', 'ppsx', 'ppsm', 'potx', 'potm'])
 for (const ext of ['vsdx', 'vsdm'])
   zipFamilies[ext] = 'visio/document.xml';
 const compound = ['xls', 'xlt', 'doc', 'dot', 'ppt', 'pps', 'pot', 'vsd', 'mpp', 'pub', 'msg'];
-export const uploadExtensions = [...Object.keys(zipFamilies), ...compound, 'accdb', 'mdb', 'one', 'onepkg', 'txt', 'pdf', 'jpg', 'jpeg', 'png', 'tif', 'tiff', 'heic'].sort();
+export const uploadExtensions = [...new Set([...Object.keys(zipFamilies), ...compound, 'accdb', 'mdb', 'one', 'onepkg', 'txt', 'pdf', 'jpg', 'jpeg', 'png', 'tif', 'tiff', 'heic', ...projectExtensions])].sort();
 export function uploadExtension(name: string): string {
   if (typeof name !== 'string' || !name || name.length > 200 || name.trim() !== name
     || Buffer.from(name, 'utf8').toString('utf8') !== name
@@ -123,7 +124,10 @@ async function heicSignature(handle: FileHandle, size: number) {
 export async function validateUploadContent(handle: FileHandle, size: number, name: string): Promise<string> {
   const ext = uploadExtension(name), head = await bytes(handle, Math.min(512, size), 0);
   try {
-    if (zipFamilies[ext]) {
+    if (projectExtensions.includes(ext)) {
+      await validateProject(handle, size, ext, head);
+    }
+    else if (zipFamilies[ext]) {
       if (head.readUInt32LE(0) !== 0x04034b50)
         throw Error();
       await officeZip(handle, size, ext);

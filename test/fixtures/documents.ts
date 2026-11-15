@@ -1,13 +1,17 @@
 // Small synthetic containers for admission/signature tests, not a claim that
 // every Office application can open these as complete documents.
 export function officePackage(family:string,macro=false):Buffer {
-  const entries=[['[Content_Types].xml','<Types/>'],[family,'<document/>'],...(macro?[[family.split('/')[0]+'/vbaProject.bin','untrusted macro bytes']]:[])];
+  return projectZip([['[Content_Types].xml','<Types/>'],[family,'<document/>'],...(macro?[[family.split('/')[0]+'/vbaProject.bin','untrusted macro bytes']] as [string,string][]:[])]);
+}
+export function projectZip(entries:readonly (readonly [string,string])[],options:{deflate?:boolean;descriptor?:boolean}={}):Buffer {
   const locals:Buffer[]=[],central:Buffer[]=[];let position=0;
   for(const [name,content]of entries){
     const n=Buffer.from(name),data=Buffer.from(content);let crc=0xffffffff;for(const b of data){crc^=b;for(let i=0;i<8;i++)crc=(crc>>>1)^((crc&1)?0xedb88320:0);}crc=(crc^0xffffffff)>>>0;
-    const local=Buffer.alloc(30);local.writeUInt32LE(0x04034b50);local.writeUInt16LE(20,4);local.writeUInt32LE(crc,14);local.writeUInt32LE(data.length,18);local.writeUInt32LE(data.length,22);local.writeUInt16LE(n.length,26);
-    const directory=Buffer.alloc(46);directory.writeUInt32LE(0x02014b50);directory.writeUInt16LE(20,4);directory.writeUInt16LE(20,6);directory.writeUInt32LE(crc,16);directory.writeUInt32LE(data.length,20);directory.writeUInt32LE(data.length,24);directory.writeUInt16LE(n.length,28);directory.writeUInt32LE(position,42);
-    locals.push(local,n,data);central.push(directory,n);position+=local.length+n.length+data.length;
+    const compressed:Buffer=options.deflate?require('node:zlib').deflateRawSync(data):data,method=options.deflate?8:0,flags=options.descriptor?8:0;
+    const local=Buffer.alloc(30);local.writeUInt32LE(0x04034b50);local.writeUInt16LE(20,4);local.writeUInt16LE(flags,6);local.writeUInt16LE(method,8);if(!options.descriptor){local.writeUInt32LE(crc,14);local.writeUInt32LE(compressed.length,18);local.writeUInt32LE(data.length,22);}local.writeUInt16LE(n.length,26);
+    const directory=Buffer.alloc(46);directory.writeUInt32LE(0x02014b50);directory.writeUInt16LE(20,4);directory.writeUInt16LE(20,6);directory.writeUInt16LE(flags,8);directory.writeUInt16LE(method,10);directory.writeUInt32LE(crc,16);directory.writeUInt32LE(compressed.length,20);directory.writeUInt32LE(data.length,24);directory.writeUInt16LE(n.length,28);directory.writeUInt32LE(position,42);
+    const descriptor=Buffer.alloc(options.descriptor?16:0);if(options.descriptor){descriptor.writeUInt32LE(0x08074b50);descriptor.writeUInt32LE(crc,4);descriptor.writeUInt32LE(compressed.length,8);descriptor.writeUInt32LE(data.length,12);}
+    locals.push(local,n,compressed,descriptor);central.push(directory,n);position+=local.length+n.length+compressed.length+descriptor.length;
   }
   const directory=Buffer.concat(central),end=Buffer.alloc(22);end.writeUInt32LE(0x06054b50);end.writeUInt16LE(entries.length,8);end.writeUInt16LE(entries.length,10);end.writeUInt32LE(directory.length,12);end.writeUInt32LE(position,16);return Buffer.concat([...locals,directory,end]);
 }

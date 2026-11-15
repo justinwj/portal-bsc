@@ -23,6 +23,7 @@ import { configureViews } from '../common/views';
 import { ManagedStorage } from './managed-storage.service';
 import { UsersService } from '../users/users.service';
 import { tiffDocument, heicDocument } from '../../test/fixtures/documents';
+import { projectArchive, projectFixtures } from '../../test/fixtures/projects';
 
 // Only the external database is replaced. Routes, guards, sessions, CSRF,
 // validation, filesystem operations and streamed HTTP bodies are real.
@@ -82,6 +83,33 @@ describe('managed upload admission and streaming HTTP',{concurrency:false},()=>{
     const done=await a.client.request(`/uploads/${id}/content`,data,'PUT',a.csrf);assert.equal(done.status,200,done.body);return id;
   }
   it('provides an authenticated upload page with CSRF and unscanned/macro warnings',async()=>{const a=await actor();const r=await a.client.request('/uploads');assert.equal(r.status,200);assert.equal(token(r.body),a.csrf);assert.match(r.body,/Office|macro/i);assert.match(r.body,/not.*scanned|unscanned/i);});
+  it('explains active project content, download-only archives and Rhino lock limitations',async()=>{
+    const a=await actor(),r=await a.client.request('/uploads');assert.match(r.body,/never runs uploaded/i);assert.match(r.body,/archives are not extracted/i);assert.match(r.body,/temporary Rhino lock/i);
+  });
+  for(const ext of ['zip','py','pyc','blend','svg','xaml','mp4','mp3'])it(`serves untrusted .${ext} only as an authorized opaque attachment`,async()=>{
+    await confirm();const owner=await actor(),data=projectFixtures[ext],id=await upload(owner,data,'project.'+ext),other=await actor('member');
+    assert.equal((await other.client.request(`/download/${id}`)).status,404);assert.equal((await other.client.request(`/files/${id}`)).status,404);
+    const r=await fetch(url+`/download/${id}`,{headers:{cookie:owner.client.cookie}});assert.equal(r.status,200);assert.equal(r.headers.get('content-type'),'application/octet-stream');assert.match(r.headers.get('content-disposition')!,/^attachment;/);assert.equal(r.headers.get('x-content-type-options'),'nosniff');assert.deepEqual(Buffer.from(await r.arrayBuffer()),data);
+    assert.equal(store.files.get(id).visibility,'private');assert.deepEqual(await readdir(join(process.env.PORTAL_UPLOADS_DIR!,'staging')),[]);assert.equal((await readdir(join(process.env.PORTAL_UPLOADS_DIR!,'objects'))).length,1);
+  });
+  it('shares and revokes one ZIP without duplicate storage or owner quota charges',async()=>{
+    await confirm();const owner=await actor(),other=await actor('member'),data=projectArchive(),id=await upload(owner,data,'project.zip');
+    assert.equal((await owner.client.request(`/files/${id}/sharing`,{recipientIds:['member']},'POST',owner.csrf)).status,303);
+    const response=await fetch(url+`/download/${id}`,{headers:{cookie:other.client.cookie}});assert.equal(response.status,200);assert.deepEqual(Buffer.from(await response.arrayBuffer()),data);
+    assert.equal(store.files.size,1);assert.equal(store.files.get(id).sizeBytes,data.length);assert.equal(store.files.get(id).uploadedByUserId,'owner');
+    assert.equal((await owner.client.request(`/files/${id}/sharing`,{},'POST',owner.csrf)).status,303);assert.equal((await other.client.request(`/download/${id}`)).status,404);
+  });
+  it('enforces ZIP reservation boundaries and cleans a short interrupted archive before releasing capacity',async()=>{
+    await confirm();const owner=await actor(),other=await actor('member'),data=projectArchive();store.settings.globalStorageQuota={mode:'limited',bytes:String(data.length)};
+    const competing=await Promise.all([intent(owner,data.length,'project.zip'),intent(other,data.length,'project.zip')]);assert.deepEqual(competing.map(x=>x.status).sort(),[201,409]);
+    const admitted=competing.findIndex(x=>x.status===201),admittedActor=admitted===0?owner:other,id=JSON.parse(competing[admitted].body).id;
+    assert.equal((await admittedActor.client.request(`/uploads/${id}/content`,data.subarray(0,30),'PUT',admittedActor.csrf)).status,400);assert.equal(store.files.get(id).upload.state,'aborted');assert.deepEqual(await readdir(join(process.env.PORTAL_UPLOADS_DIR!,'staging')),[]);
+    assert.equal((await intent(owner,data.length,'retry.zip')).status,201);
+  });
+  it('rejects encrypted ZIP content and never publishes its partial bytes',async()=>{
+    await confirm();const owner=await actor(),data=projectArchive();data.writeUInt16LE(1,6);const r=await intent(owner,data.length,'encrypted.zip'),id=JSON.parse(r.body).id;assert.equal(r.status,201);
+    assert.equal((await owner.client.request(`/uploads/${id}/content`,data,'PUT',owner.csrf)).status,400);assert.equal(store.files.get(id).upload.state,'aborted');assert.equal((await owner.client.request(`/download/${id}`)).status,404);
+  });
   for(const [ext,data] of [['tif',tiffDocument()],['tiff',tiffDocument(true)],['heic',heicDocument()]] as const)it(`privately streams .${ext} and downloads exact bytes with attachment protections`,async()=>{
     await confirm();const owner=await actor(),id=await upload(owner,data,'image.'+ext),member=await actor('member');
     const r=await fetch(url+`/download/${id}`,{headers:{cookie:owner.client.cookie}});

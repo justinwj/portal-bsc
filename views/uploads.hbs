@@ -1,6 +1,9 @@
 <h1>Upload a file</h1>
 <p>Uploads are private until you explicitly share with selected approved users. Microsoft Office files, including macro-enabled documents, are untrusted. Never enable macros unless you trust their source.</p>
 <p>Files are not scanned by Portal before download. Scheduled Synology antivirus scanning may occur later.</p>
+<p>Portal never runs uploaded Python, bytecode, Blender scripts, macros or embedded code. SVG and XAML are downloads only; there are no previews or conversions.</p>
+<p>ZIP archives are not extracted or recompressed by Portal. Encrypted archives are rejected. Archive structure checks do not establish content safety; scheduled scanning may be less effective for archived content.</p>
+<p>RHL files are temporary Rhino lock records, not model files. Use a project ZIP to include model dependencies that are not individually supported.</p>
 <p>Supported extensions: {{extensions}}.</p>
 <form id="upload-form" method="POST" action="/uploads/intents">
   <input type="hidden" name="_csrf" value="{{csrfToken}}" />
