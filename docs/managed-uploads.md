@@ -75,9 +75,11 @@ Extensions are case-insensitive. The original filename is retained as metadata; 
 | Visio | `.vsdx`, `.vsdm`, `.vsd` |
 | OneNote | `.one`, `.onepkg` |
 | Project, Publisher, Outlook | `.mpp`, `.pub`, `.msg` |
-| Other | `.txt`, `.pdf`, `.jpg`, `.jpeg`, `.png` |
+| Other | `.txt`, `.pdf`, `.jpg`, `.jpeg`, `.png`, `.tif`, `.tiff`, `.heic` |
 
-This is **38 extensions**. `.xlam` is deliberately included as the requested macro-based Excel add-in. Native executable add-ins (`.xll`, DLL/COM), scripts, executables, legacy `.xla`, `.ppa`/`.ppam` and arbitrary ZIPs are not accepted. No uploaded content is executed, extracted or rendered by the server.
+This is **41 extensions**, including the TIFF/HEIC addition in Session 7G-C1. `.xlam` is deliberately included as the requested macro-based Excel add-in. Native executable add-ins (`.xll`, DLL/COM), scripts, executables, legacy `.xla`, `.ppa`/`.ppam` and arbitrary ZIPs are not accepted. No uploaded content is executed, extracted or rendered by the server.
+
+TIFF accepts either byte order with classic TIFF/BigTIFF headers and a bounded first-directory check. HEIC requires an explicit HEVC image brand (`heic`, `heix`, `hevc` or `hevx`), bounded ISO-BMFF boxes, metadata/track structure and nonempty media data. Generic HEIF/AVIF is not implicitly accepted. These are structural signature checks, not complete image decoders or malware validation. TIFF/HEIC use opaque attachment downloads; no preview or conversion is added. See [Session 7G-C1 acceptance](development-session-7g-c1.md) for real supplied-file results and pending Office visual checks.
 
 OOXML checks a bounded ZIP directory and expected family parts, rejects malformed/encrypted/multidisk/ZIP64 containers and VBA parts under non-macro extensions. Legacy compound files, Access and OneNote use practical header/signature checks. TXT requires UTF-8 without NUL/executable signatures; PDF/images use bounded signature checks. These checks detect obvious mismatches, **not full Office validity, macro safety or malware**. Some same-container legacy disguises cannot be distinguished by the header. Password-encrypted OOXML, ZIP64 or unusually large container directories may be rejected. Synthetic automated fixtures do not replace testing representative real documents from each installed Office application.
 
