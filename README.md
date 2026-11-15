@@ -17,6 +17,7 @@ Internal file portal for a Synology NAS deployment, with secure server-rendered 
 - Persistent administrator capacity controls and metadata-based storage quota policy/reporting
 - Opt-in streaming managed uploads with durable quota reservations, recovery and owner-selected sharing
 - Private-by-default managed files, audited administrator grants and attachment-only Office downloads
+- Download-only engineering/3D projects, scripts, media and intact ZIP bundles with bounded format inspection
 - Redis-backed session storage in production mode
 - Audit logging for login success/failure and downloads
 - `/healthz` JSON health endpoint
