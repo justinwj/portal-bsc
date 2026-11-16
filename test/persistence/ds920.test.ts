@@ -321,7 +321,7 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
       '-addext',`subjectAltName=DNS:${serveHost}`,'-keyout',key,'-out',cert]);serveCa=await readFile(cert);
     const location=(path:string,headers:Record<string,string>={})=>{
       const fields={Host:'$host','X-Forwarded-Host':'$host','X-Forwarded-Proto':'$scheme','X-Forwarded-For':'$remote_addr','Tailscale-Funnel-Request':'',...headers};
-      return `location ${path} { proxy_pass http://backend${path==='/'?'':'/login'}; proxy_http_version 1.1; proxy_set_header Connection ""; ${Object.entries(fields).map(([name,value])=>`proxy_set_header ${name} "${value}";`).join(' ')} }`;
+      return `location ${path} { proxy_pass http://backend${path==='/'?'':'/login'}; proxy_http_version 1.1; proxy_request_buffering off; proxy_buffering off; proxy_set_header Connection ""; ${Object.entries(fields).map(([name,value])=>`proxy_set_header ${name} "${value}";`).join(' ')} }`;
     };
     const frontConfig=join(directory,'serve-front.conf');
     await writeFile(frontConfig,`events {worker_connections 128;} http {upstream backend {server nginx:80;keepalive 8;} server {listen 443 ssl;server_name ${serveHost};ssl_certificate /tls/serve.crt;ssl_certificate_key /tls/serve.key;add_header X-Test-Observed-Client $remote_addr always;
@@ -386,6 +386,20 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
     assert.equal((await status('enable',{})).status,302);
     assert.equal((await served('/files',{cookie:serveMember.cookie})).status,401);
     serveMember=await serveLogin('existing-member');
+  });
+  it('streams a private upload through the proxy contract and retains exact-byte quota enforcement',async()=>{
+    const content='proxy upload fixture',size=Buffer.byteLength(content);
+    const intent=await serveJson(serveOwner,'/uploads/intents',{originalFilename:'proxy.txt',title:'Proxy fixture',description:'synthetic',sizeBytes:String(size),idempotencyKey:randomUUID()});
+    assert.equal(intent.status,201,intent.body);const id=JSON.parse(intent.body).id;
+    const upload=await served(`/uploads/${id}/content`,{method:'PUT',cookie:serveOwner.cookie,
+      headers:{'x-csrf-token':serveOwner.csrf,'content-type':'application/octet-stream','content-length':String(size)},body:content});
+    assert.equal(upload.status,200,upload.body);
+    const download=await served(`/download/${id}`,{cookie:serveOwner.cookie});
+    assert.equal(download.status,200);assert.equal(download.bytes.toString(),content);
+    assert.equal((await client.use('portal_files').get(id)).sha256,createHash('sha256').update(content).digest('hex'));
+    assert.equal((await served(`/download/${id}`,{cookie:serveMember.cookie})).status,404);
+    const excess=await serveJson(serveOwner,'/uploads/intents',{originalFilename:'excess.txt',title:'Excess',description:'',sizeBytes:'1000000000',idempotencyKey:randomUUID()});
+    assert.equal(excess.status,409,excess.body);
   });
   it('preserves CSRF logout validation and destroys a real Redis session through the proxy chain',async()=>{
     for(const value of [{},{_csrf:'invalid'}])assert.equal((await served('/logout',{method:'POST',cookie:serveOwner.cookie,
