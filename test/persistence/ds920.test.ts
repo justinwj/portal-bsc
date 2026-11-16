@@ -397,6 +397,9 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
   });
   it('retains proxy configuration, sessions and private bytes after disposable proxy/app restart',async()=>{
     await compose(['restart','serve-front']);await compose(['up','-d','--no-deps','--force-recreate','app']);
+    // The fixture asks Docker for an ephemeral host port; discover it again.
+    // Production Serve uses the separately verified fixed HTTPS service port.
+    servePort=Number((await compose(['port','serve-front','443'])).stdout.trim().split(':').pop());
     await eventually(async()=>assert.equal((await served('/healthz')).status,200),'restarted proxy-chain readiness');
     assert.equal((await served('/files',{cookie:serveOwner.cookie})).status,200);
     assert.deepEqual((await served(`/download/${fileId}`,{cookie:serveOwner.cookie})).bytes,bytes);
