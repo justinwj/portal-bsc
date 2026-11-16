@@ -1,0 +1,25 @@
+{
+  "groups": {
+    "group:portal-owner": ["OWNER_REPLACE_ME@example.invalid"]
+  },
+  "hosts": {
+    "portal-nas": "REPLACE_WITH_VERIFIED_NAS_TAILSCALE_IP",
+    "owner-stormcraft": "REPLACE_WITH_VERIFIED_STORMCRAFT_TAILSCALE_IP",
+    "owner-white-raptor": "REPLACE_WITH_VERIFIED_WHITE_RAPTOR_TAILSCALE_IP",
+    "owner-x1-pro-ai": "REPLACE_WITH_VERIFIED_X1_PRO_AI_TAILSCALE_IP",
+    "owner-zenbook": "REPLACE_WITH_VERIFIED_ZENBOOK_TAILSCALE_IP"
+  },
+  "grants": [
+    {"src": ["group:portal-owner"], "dst": ["portal-nas"], "ip": ["tcp:443"]},
+    {"src": ["INVITEE_REPLACE_ME@example.invalid"], "dst": ["portal-nas"], "ip": ["tcp:443"]}
+  ],
+  "tests": [
+    {"src": "OWNER_REPLACE_ME@example.invalid", "accept": ["portal-nas:443"]},
+    {
+      "src": "INVITEE_REPLACE_ME@example.invalid",
+      "accept": ["portal-nas:443"],
+      "deny": ["portal-nas:80", "portal-nas:8088", "portal-nas:3000", "portal-nas:5984", "portal-nas:6379", "portal-nas:22", "portal-nas:445", "portal-nas:5000", "portal-nas:5001", "owner-stormcraft:443", "owner-white-raptor:443", "owner-x1-pro-ai:443", "owner-zenbook:443"]
+    },
+    {"src": "UNAUTHORIZED_REPLACE_ME@example.invalid", "deny": ["portal-nas:443", "portal-nas:8088"]}
+  ]
+}

@@ -1,14 +1,14 @@
-const {readFileSync} = require('node:fs');
+const {readFileSync, writeFileSync} = require('node:fs');
 const {join} = require('node:path');
 const {isIP} = require('node:net');
 
-// Offline rendering only: no NAS access, file writes, network calls or deployment.
+// Offline rendering only: no remote calls or deployment; optional exclusive local output.
 function renderTailscaleProxy(env) {
   const input = env.PORTAL_PUBLIC_ORIGIN;
   let origin;
   try { origin = new URL(input); } catch { throw Error('PORTAL_PUBLIC_ORIGIN must be an HTTPS origin'); }
   const dns = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
-  if (typeof input !== 'string' || input !== input.trim() || origin.protocol !== 'https:'
+  if (typeof input !== 'string' || /[\u0000-\u0020\u007f]/.test(input) || origin.protocol !== 'https:'
       || origin.username || origin.password || origin.pathname !== '/' || origin.search || origin.hash
       || origin.hostname.length > 253 || isIP(origin.hostname) || !dns.test(origin.hostname))
     throw Error('PORTAL_PUBLIC_ORIGIN must contain only an HTTPS DNS origin');
@@ -36,6 +36,12 @@ function renderTailscaleProxy(env) {
 
 module.exports = {renderTailscaleProxy};
 if (require.main === module) {
-  try { process.stdout.write(renderTailscaleProxy(process.env)); }
+  try {
+    const args=process.argv.slice(2);
+    if(args.length && (args.length!==2 || args[0]!=='--output'))throw Error('Usage: render-tailscale-proxy.cjs [--output new-file]');
+    const config=renderTailscaleProxy(process.env);
+    if(args.length)writeFileSync(args[1],config,{encoding:'utf8',flag:'wx',mode:0o600});
+    else process.stdout.write(config);
+  }
   catch (error) { console.error(error.message); process.exitCode = 1; }
 }

@@ -2,6 +2,9 @@ const assert = require('node:assert/strict');
 const {test} = require('node:test');
 const path = require('node:path');
 const {spawnSync} = require('node:child_process');
+const fs = require('node:fs');
+const {readFileSync} = fs;
+const {tmpdir} = require('node:os');
 const script = path.resolve(__dirname, '../../scripts/render-tailscale-proxy.cjs');
 const valid = {PORTAL_PUBLIC_ORIGIN:'https://portal-ci.example.test',PORTAL_SERVE_PROXY_PEERS:'192.0.2.10'};
 const render = env => require(script).renderTailscaleProxy(env);
@@ -50,4 +53,35 @@ test('renderer never executes deployment commands and fails without emitting par
   assert.equal(result.status,1);
   assert.equal(result.stdout,'');
   assert.match(result.stderr,/PORTAL_PUBLIC_ORIGIN/);
+});
+test('canonical origin rejects embedded control characters instead of normalizing them',()=>{
+  assert.throws(()=>render({...valid,PORTAL_PUBLIC_ORIGIN:'https://portal-ci.exa\nmple.test'}),/PORTAL_PUBLIC_ORIGIN/);
+});
+test('sharing policy fragment grants only the named NAS HTTPS service to explicit users',()=>{
+  const policy=JSON.parse(readFileSync(path.resolve(__dirname,'../../deploy/ds920/tailscale-policy.json.example'),'utf8'));
+  assert.equal(policy.acls,undefined);
+  assert.equal(policy.nodeAttrs,undefined,'Do not add a Funnel capability');
+  assert.deepEqual(policy.grants.map(rule=>rule.ip),[['tcp:443'],['tcp:443']]);
+  for(const rule of policy.grants){assert.deepEqual(rule.dst,['portal-nas']);assert.ok(!rule.src.includes('*'));}
+  assert.ok(policy.tests.some(t=>t.deny?.includes('portal-nas:8088')));
+  assert.ok(policy.tests.some(t=>t.deny?.includes('portal-nas:443')));
+  assert.match(policy.hosts['portal-nas'],/REPLACE/,'Never invent a NAS address');
+});
+test('offline output is UTF-8 without PowerShell redirection or a byte-order mark',()=>{
+  const directory=fs.mkdtempSync(path.join(tmpdir(),'portal-render-')),output=path.join(directory,'nginx.conf');
+  try{
+    const result=spawnSync(process.execPath,[script,'--output',output],{env:{...process.env,...valid},encoding:'utf8'});
+    assert.equal(result.status,0,result.stderr);assert.equal(result.stdout,'');
+    const data=fs.readFileSync(output);assert.equal(data[0],35);assert.equal(data.includes(0),false);
+    assert.equal(data.toString('utf8'),render(valid));
+  }finally{assert.equal(path.dirname(directory),tmpdir());assert.ok(path.basename(directory).startsWith('portal-render-'));fs.rmSync(directory,{recursive:true});}
+});
+test('offline rendering never overwrites an existing configuration file',()=>{
+  const directory=fs.mkdtempSync(path.join(tmpdir(),'portal-render-')),output=path.join(directory,'nginx.conf');
+  try{
+    fs.writeFileSync(output,'original protected contents');
+    const result=spawnSync(process.execPath,[script,'--output',output],{env:{...process.env,...valid},encoding:'utf8'});
+    assert.equal(result.status,1);assert.equal(fs.readFileSync(output,'utf8'),'original protected contents');
+    assert.equal(result.stdout,'');
+  }finally{assert.equal(path.dirname(directory),tmpdir());assert.ok(path.basename(directory).startsWith('portal-render-'));fs.rmSync(directory,{recursive:true});}
 });
