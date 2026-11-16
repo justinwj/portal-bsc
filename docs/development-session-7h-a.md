@@ -1,5 +1,7 @@
 # Session 7H-A — DS920+ production deployment preparation
 
+**Session 7H-B update:** [Tailscale Serve HTTPS preparation](tailscale-deployment-preparation.md) supersedes the historical DSM preference and defers DS925+ offsite backup/DR to R2. 7H-B authorizes preparation only, not any deployment action described in this historical report. Installed NAS compatibility, identity, backend restriction and proxy-source evidence remain pending.
+
 **Updated after the supplied original configuration:** see the [reconciliation review](ds920-existing-configuration-review.md) and follow-up below. The initial missing-YAML/external-network/TLS-only assumptions in the historical evidence are superseded. Current preparation preserves `8088:80`, inherits the original default network and leaves HTTPS/DSM trust undecided. No NAS was accessed.
 
 **Latest owner inspection:** Justin has confirmed that DSM's Reverse Proxy list on `jwj_NAS_1` is empty. No Portal hostname, HTTPS source/destination, certificate assignment or trusted proxy address is configured. DSM HTTPS termination to the existing HTTP backend on 8088 is the owner-preferred option to evaluate. HTTPS, enforceable backend restrictions, observed trusted-source/header behavior and certificate management remain outstanding; no rule or trust behavior has been implemented.

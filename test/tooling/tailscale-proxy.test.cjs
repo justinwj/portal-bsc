@@ -38,8 +38,8 @@ test('exact IPv6 and multiple observed peers are supported without trusting a su
   assert.match(config,/set_real_ip_from 2001:db8::10;/);
   assert.doesNotMatch(config,/set_real_ip_from (0\.0\.0\.0|100\.64\.0\.0)\//);
 });
-for(const value of [undefined,'','http://portal-ci.example.test','https://user:password@portal-ci.example.test','https://portal-ci.example.test/path','https://portal-ci.example.test/?x=1','https://portal-ci.example.test/#x','https://127.0.0.1','https://portal-ci.example.test;evil',' https://portal-ci.example.test']){
-  test(`rejects unsafe or incomplete canonical origin (${String(value).split(':')[0]})`,()=>{
+for(const [index,value] of [undefined,'','http://portal-ci.example.test','https://user:password@portal-ci.example.test','https://portal-ci.example.test/path','https://portal-ci.example.test/?x=1','https://portal-ci.example.test/#x','https://127.0.0.1','https://portal-ci.example.test;evil',' https://portal-ci.example.test'].entries()){
+  test(`rejects unsafe or incomplete canonical origin (case ${index+1})`,()=>{
     assert.throws(()=>render({...valid,PORTAL_PUBLIC_ORIGIN:value}),/PORTAL_PUBLIC_ORIGIN/);
   });
 }

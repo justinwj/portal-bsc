@@ -1,6 +1,6 @@
 # DS920+ Release 1 deployment preparation
 
-**Review candidate only. No NAS connection, provisioning, transfer or deployment has been performed. Session 7H-B requires separate authorization.** The primary target is `jwj_NAS_1` (DS920+); DS925+ is the proposed R1 backup destination and a possible R2 standby. The older [DS925 guide](ds925-production-readiness.md) is not the deployment definition for this populated DS920+.
+**Review candidate only. No NAS connection, provisioning, transfer or deployment has been performed.** Session 7H-B authorizes [Tailscale HTTPS preparation](tailscale-deployment-preparation.md), **not deployment**; its approved direction supersedes the DSM preference retained below. The primary target is `jwj_NAS_1` (DS920+). DS925+ offsite backup/disaster recovery is deferred to **R2**; R1 must verify existing backup arrangements. The older [DS925 guide](ds925-production-readiness.md) is not the deployment definition for this populated DS920+.
 
 ## Preserve the existing project
 
@@ -87,9 +87,9 @@ Safe extensionless acceptance: upload a harmless synthetic TXT through Portal in
 
 Scheduled scanning is **not a clean-before-download gate**. Portal continues to label files `not-scanned`. Office macros/scripts and archived content remain untrusted; archive scanning can be limited, especially for nested/encrypted content. [Synology documents Smart Scan and the 2,048 MB exclusion](https://www.synology.com/en-sg/dsm/7.4/software_spec/antivirus_essential); the initial decimal 1 GB maximum stays below it. Scanner quarantine/mutation can make objects unavailable and reconciliation fail closed; preserve metadata/charges and review the incident rather than replacing bytes or editing CouchDB. Schedule to minimize active-upload interference. No scanner or NAS task is installed/configured by this proposal.
 
-## Versioned backup to DS925+ and restore
+## R1 backup verification and future DS925 proposal
 
-Propose **Hyper Backup** on DS920+ to a restricted DS925+ Hyper Backup Vault destination, with version retention, integrity checks, protected access and encryption/recovery keys stored separately. Do not configure any task yet. Synology [recommends backing up mapped host folders](https://kb.synology.com/en-me/DSM/tutorial/How_do_I_back_up_Docker_containers); this does not itself guarantee application consistency.
+For **R1**, verify existing backup coverage, consistency and a representative restore; no new destination or task is selected here. The earlier DS920+ → DS925+ versioned **Hyper Backup** / Vault proposal is now **R2** only, including offsite placement, retention, integrity checks and protected recovery keys. Do not configure it in 7H-B. Synology [recommends backing up mapped host folders](https://kb.synology.com/en-me/DSM/tutorial/How_do_I_back_up_Docker_containers); this does not itself guarantee application consistency.
 
 Include all of:
 
@@ -103,7 +103,7 @@ Restore verification must use a separate disposable destination: select a versio
 
 ## Rollback and manual deployment acceptance
 
-Before any 7H-B action, obtain a tested coherent backup and private copies of the original three-service project/nginx.conf, exact image IDs and mounts. App-only addition must not recreate any original container. For the current proxy plan, preserve mounts and ports, update the existing bound config file **in place** (not by renaming/replacing its inode), run `nginx -t`, then reload only the existing Nginx process after approval. Rollback similarly restores original content in place, validates and reloads it, then stops only app gracefully. The [supplied placeholder reference](../deploy/ds920/nginx.original-placeholder.conf) records the expected original response, but a private live backup remains mandatory. Retain all managed bytes, new database records, logs and app/image for investigation. Do not use project `down`, database restoration alone, data deletion or automatic schema downgrade.
+Before any future separately approved NAS deployment, obtain a tested coherent backup and private copies of the original three-service project/nginx.conf, exact image IDs and mounts. Session 7H-B preparation is not that approval. App-only addition must not recreate any original container. For the current proxy plan, preserve mounts and ports, update the existing bound config file **in place** (not by renaming/replacing its inode), run `nginx -t`, then reload only the existing Nginx process after approval. Rollback similarly restores original content in place, validates and reloads it, then stops only app gracefully. The [supplied placeholder reference](../deploy/ds920/nginx.original-placeholder.conf) records the expected original response, but a private live backup remains mandatory. Retain all managed bytes, new database records, logs and app/image for investigation. Do not use project `down`, database restoration alone, data deletion or automatic schema downgrade.
 
 Manual 7H-B acceptance checklist (all pending):
 
@@ -114,6 +114,6 @@ Manual 7H-B acceptance checklist (all pending):
 - [ ] Verify all existing accounts/history/files survive. Check real login/CSRF, administrator safety/approval, unauthenticated and private-file denial, attachment headers, owner upload/download byte hashes, sharing/revocation, exact quotas and rollback. Do not seed/reset existing users.
 - [ ] Keep the existing config bind/log mount/8088:80. After separate approval, write reviewed HTTP config in place, check `nginx -t`, then reload the same container's process. Do not select TLS files/mounts before the outstanding HTTPS decision. Verify no static-file route or spoofed forwarded-HTTPS bypass.
 - [ ] Test app restart/recreation and known interrupted-upload recovery using disposable acceptance files. Do not manipulate live CouchDB metadata for fault injection. Verify the original CouchDB/Redis container IDs remain unchanged for app-only operations.
-- [ ] Complete DS920+ antivirus/extensionless evidence and coherent DS925+ versioned backup/restore acceptance above. Record dates and outcomes without secrets.
+- [ ] Complete DS920+ antivirus/extensionless evidence and coherent existing R1 backup/restore acceptance above. DS925+ offsite backup/DR is R2. Record dates and outcomes without secrets.
 
 R2 proposal, **not implemented**: documented recovery-time/recovery-point objectives, automated backup verification and a separately authorized standby activation mechanism. Any future standby must fence the old writer and restore/coordinate matching CouchDB/files/storage identity before accepting traffic. R1 does not provide automatic failover, active-active coordination or storage synchronization.
