@@ -6,6 +6,7 @@ const yaml = require('js-yaml');
 const root = join(__dirname, '../..');
 const deployment = () => yaml.load(readFileSync(join(root, 'deploy/ds920/compose.app.yml'), 'utf8'));
 const proxy = () => readFileSync(join(root, 'deploy/ds920/nginx.conf'), 'utf8');
+const httpProxy = () => readFileSync(join(root, 'deploy/ds920/nginx.http-proposal.conf'), 'utf8');
 
 test('DS920 addition cannot replace existing database, cache, proxy or persistent volumes', () => {
   const config = deployment();
@@ -71,4 +72,26 @@ test('DS920 proxy retains upstream connections while refreshing recreated app ad
   assert.match(config, /server app:3000 resolve;/);
   assert.match(config, /keepalive 8;/);
   assert.match(config, /proxy_pass http:\/\/portal_application;/);
+});
+test('DS920 HTTP routing proposal supports the existing frontend without selecting TLS or changing host ports', () => {
+  const config = httpProxy();
+  assert.match(config, /events\s*\{/);
+  assert.match(config, /http\s*\{/);
+  assert.match(config, /listen 80;/);
+  assert.doesNotMatch(config, /listen\s+(443|8088)\b|ssl_certificate|\bssl_protocols/);
+  assert.match(config, /proxy_pass http:\/\/portal_application;/);
+  assert.match(config, /server app:3000 resolve;/);
+  assert.equal(deployment().services.app.ports, undefined);
+});
+test('DS920 HTTP routing cannot spoof HTTPS, bypass file authorization or regress streaming keepalive', () => {
+  const config = httpProxy();
+  assert.match(config, /proxy_set_header X-Forwarded-Proto \$scheme;/);
+  assert.match(config, /proxy_set_header X-Forwarded-For \$remote_addr;/);
+  assert.doesNotMatch(config, /\$http_x_forwarded|\$proxy_add_x_forwarded_for|X-Forwarded-Proto https/);
+  assert.match(config, /keepalive 8;/);
+  assert.match(config, /client_max_body_size 1000000000;/);
+  assert.match(config, /proxy_request_buffering off;/);
+  assert.match(config, /proxy_buffering off;/);
+  assert.match(config, /proxy_next_upstream off;/);
+  assert.doesNotMatch(config, /\b(alias|root|try_files|autoindex)\s/);
 });

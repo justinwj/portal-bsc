@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdtemp, mkdir, writeFile, readFile, chmod } from 'node:fs/promises';
 import { request } from 'node:https';
+import { request as requestHttp } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -18,6 +19,7 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
   const password = 'DisposableDeploymentPassword123';
   let directory: string, base: string, envFile: string, proxyPort: number, client: any;
   let attempted = false, networkCreated = false, fileId: string, originalIds: string[], beforeUser: any;
+  let activeProxyConfig: string;
   const bytes = Buffer.from('disposable private deployment fixture');
   const overlay = resolve('deploy/ds920/compose.app.yml');
 
@@ -87,6 +89,8 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
     await exec('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-subj', '/CN=localhost',
       '-keyout', join(directory, 'tls/tls.key'), '-out', join(directory, 'tls/tls.crt')]);
     base = join(directory, 'existing.yml'); envFile = join(directory, 'protected.env');
+    activeProxyConfig = join(directory, 'nginx.conf');
+    await writeFile(activeProxyConfig, await readFile(resolve('deploy/ds920/nginx.conf')));
     const bind = (source: string, target: string, read_only = false) => ({ type: 'bind', source, target, read_only, bind: { create_host_path: false } });
     // Production candidate inherits the original services; only this CI model
     // supplies their definitions and temporary loopback diagnostics ports.
@@ -95,8 +99,8 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
         volumes: [bind(join(directory, 'data'), '/opt/couchdb/data'), bind(join(directory, 'config'), '/opt/couchdb/etc/local.d')],
         ports: ['127.0.0.1::5984'], networks: ['portal-existing'] },
       redis: { image: 'redis:7-alpine', networks: ['portal-existing'] },
-      nginx: { image: 'nginx:stable-alpine', ports: ['127.0.0.1::443'], networks: ['portal-existing'],
-        volumes: [bind(resolve('deploy/ds920/nginx.conf'), '/etc/nginx/nginx.conf', true),
+      nginx: { image: 'nginx:stable-alpine', ports: ['127.0.0.1::443', '127.0.0.1::80'], networks: ['portal-existing'],
+        volumes: [bind(activeProxyConfig, '/etc/nginx/nginx.conf', true),
           bind(join(directory, 'tls'), '/etc/nginx/portal-tls', true), bind(join(directory, 'logs'), '/var/log/nginx')] },
     }, networks: { 'portal-existing': { external: true, name: network } } }));
     const imageId = (await exec('docker', ['image', 'inspect', '--format', '{{.Id}}', 'portal-bsc:ci'])).stdout.trim();
@@ -227,5 +231,38 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
     assert.deepEqual(await client.use('portal_users').get('existing-admin'), beforeUser);
     assert.equal((await client.use('portal_audit').get('existing-history')).event, 'test.preexisting');
     assert.deepEqual((await http(`/download/${fileId}`, { cookie: (await login()).cookie })).bytes, bytes);
+  });
+  it('reloads the HTTP routing proposal in the same Nginx container without changing its host binding or trusting HTTPS claims', async () => {
+    const containerId = (await compose(['ps', '-q', 'nginx'])).stdout.trim();
+    const infrastructureIds = await ids();
+    const binding = (await compose(['port', 'nginx', '80'])).stdout.trim();
+    const port = Number(binding.split(':').pop());
+    // Both listeners have disposable ports from the start. This is not a NAS
+    // port change or an assertion that the uninspected mapping is 8088 -> 80.
+    await writeFile(activeProxyConfig, await readFile(resolve('deploy/ds920/nginx.http-proposal.conf')));
+    await compose(['exec', '-T', 'nginx', 'nginx', '-t']);
+    await compose(['exec', '-T', 'nginx', 'nginx', '-s', 'reload']);
+    function plain(path: string, headers: Record<string, string> = {}) {
+      return new Promise<{status: number; headers: any; body: string}>((resolveResult, reject) => {
+        const req = requestHttp({ hostname: '127.0.0.1', port, path, headers }, res => {
+          const chunks: Buffer[] = []; res.on('data', chunk => chunks.push(chunk));
+          res.on('end', () => resolveResult({ status: res.statusCode!, headers: res.headers, body: Buffer.concat(chunks).toString() }));
+          res.on('error', reject);
+        });
+        req.on('error', reject); req.setTimeout(5000, () => req.destroy(new Error('HTTP routing deadline'))); req.end();
+      });
+    }
+    await eventually(async () => assert.equal((await plain('/healthz')).status, 200), 'HTTP routing after reload');
+    for (const headers of [{}, { 'X-Forwarded-Proto': 'https', 'X-Forwarded-For': '198.51.100.1' }]) {
+      const page = await plain('/login', headers);
+      assert.equal(page.status, 200); assert.ok(formToken(page.body));
+      assert.equal(page.headers['set-cookie'], undefined, 'Plain HTTP must not acquire a production Secure-cookie session');
+    }
+    assert.equal((await plain(`/download/${fileId}`)).status, 401);
+    assert.equal((await plain('/sentinel.txt')).status, 404);
+    assert.equal((await compose(['ps', '-q', 'nginx'])).stdout.trim(), containerId);
+    assert.equal((await compose(['port', 'nginx', '80'])).stdout.trim(), binding);
+    assert.deepEqual(await ids(), infrastructureIds);
+    assert.deepEqual(await client.use('portal_users').get('existing-admin'), beforeUser);
   });
 });
