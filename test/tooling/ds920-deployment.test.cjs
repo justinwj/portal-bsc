@@ -78,6 +78,8 @@ test('DS920 HTTP routing proposal supports the existing frontend without selecti
   assert.match(config, /http\s*\{/);
   assert.match(config, /listen 80;/);
   assert.match(config, /worker_connections 1024;/);
+  for (const candidate of [config, proxy()])
+    assert.doesNotMatch(candidate, /^\s*pid\s/m, 'Inherit the running original daemon PID path during reload');
   assert.doesNotMatch(config, /listen\s+(443|8088)\b|ssl_certificate|\bssl_protocols/);
   assert.match(config, /proxy_pass http:\/\/portal_application;/);
   assert.match(config, /server app:3000 resolve;/);
