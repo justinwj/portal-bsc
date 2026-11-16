@@ -3,7 +3,7 @@ const {join} = require('node:path');
 const {isIP} = require('node:net');
 
 // Offline rendering only: no remote calls or deployment; optional exclusive local output.
-function renderTailscaleProxy(env) {
+function canonicalOrigin(env) {
   const input = env.PORTAL_PUBLIC_ORIGIN;
   let origin;
   try { origin = new URL(input); } catch { throw Error('PORTAL_PUBLIC_ORIGIN must be an HTTPS origin'); }
@@ -12,6 +12,10 @@ function renderTailscaleProxy(env) {
       || origin.username || origin.password || origin.pathname !== '/' || origin.search || origin.hash
       || origin.hostname.length > 253 || isIP(origin.hostname) || !dns.test(origin.hostname))
     throw Error('PORTAL_PUBLIC_ORIGIN must contain only an HTTPS DNS origin');
+  return origin;
+}
+function renderTailscaleProxy(env) {
+  const origin = canonicalOrigin(env);
   const raw = env.PORTAL_SERVE_PROXY_PEERS;
   const peers = typeof raw === 'string' ? raw.split(',').map(value => value.trim()) : [];
   if (!peers.length || peers.length > 4 || peers.some(value => !isIP(value) || value.includes('%'))
@@ -34,7 +38,7 @@ function renderTailscaleProxy(env) {
     });
 }
 
-module.exports = {renderTailscaleProxy};
+module.exports = {renderTailscaleProxy, canonicalOrigin};
 if (require.main === module) {
   try {
     const args=process.argv.slice(2);

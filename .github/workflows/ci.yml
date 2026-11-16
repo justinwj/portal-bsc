@@ -115,7 +115,59 @@ jobs:
           cache: npm
       - run: npm ci
       - run: docker build --pull --target runtime --tag portal-bsc:ci .
+      - name: Build restricted inherited-socket Nginx image (no publication)
+        run: docker build --pull --file Dockerfile.nginx-socket --tag portal-nginx-socket:ci .
       - name: Production Compose persistence and container smoke tests
         run: npm run test:persistence
         env:
           INTEGRATION_TESTS: '1'
+
+  docker24-socket:
+    name: Docker 24.0.2 and Compose 2.20.1 Unix transport compatibility
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: docker build --file Dockerfile.nginx-socket --tag portal-nginx-socket:ci .
+      - name: Test against disposable exact-version daemon and Compose client
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Entirely disposable GitHub runner; no NAS or remote Docker endpoint.
+          docker run --privileged -d --name portal-docker24 -e DOCKER_TLS_CERTDIR= \
+            -v /tmp:/tmp -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
+            -p 127.0.0.1::2375 docker:24.0.2-dind --tls=false
+          trap 'docker rm -f portal-docker24 >/dev/null' EXIT
+          endpoint="tcp://$(docker port portal-docker24 2375)"
+          ready=false
+          for attempt in $(seq 1 60); do
+            if docker --host "$endpoint" info >/dev/null 2>&1; then ready=true; break; fi
+            sleep 1
+          done
+          test "$ready" = true
+          test "$(docker --host "$endpoint" version --format '{{.Server.Version}}')" = 24.0.2
+          docker save portal-nginx-socket:ci | docker --host "$endpoint" load
+          DOCKER_HOST="$endpoint" node --test --test-reporter=tap --require ts-node/register test/persistence/unix-socket.test.ts
+          config="$RUNNER_TEMP/portal-compose220"
+          mkdir -p "$config/cli-plugins"
+          cd "$config/cli-plugins"
+          curl --fail --silent --show-error --location -O https://github.com/docker/compose/releases/download/v2.20.1/docker-compose-linux-x86_64
+          curl --fail --silent --show-error --location -O https://github.com/docker/compose/releases/download/v2.20.1/docker-compose-linux-x86_64.sha256
+          sha256sum -c docker-compose-linux-x86_64.sha256
+          mv docker-compose-linux-x86_64 docker-compose
+          chmod 700 docker-compose
+          cd "$GITHUB_WORKSPACE"
+          export DOCKER_CONFIG="$config" DOCKER_HOST="$endpoint"
+          docker compose version
+          test "$(docker compose version --short)" = 2.20.1
+          COUCHDB_USER=ci-only COUCHDB_PASSWORD=ci-only PORTAL_NGINX_SOCKET_IMAGE=portal-nginx-socket:ci \
+            PORTAL_SOCKET_GID=0 PORTAL_SOCKET_HOST_PATH=/not-created/portal-socket \
+            docker compose -p portal -f deploy/ds920/compose.unix.yml config --format json > "$RUNNER_TEMP/portal-unix-compose.json"
+          node -e 'const c=require(process.env.RUNNER_TEMP+"/portal-unix-compose.json");require("node:assert/strict").equal(c.services.nginx.ports,undefined);require("node:assert/strict").deepEqual(Object.keys(c.networks),["default"]);console.log("Compose 2.20.1: no Nginx ports; original implicit default network")'

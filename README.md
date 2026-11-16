@@ -84,6 +84,8 @@ Supply valid `ADMIN_USERNAME`, `ADMIN_EMAIL`, and `ADMIN_PASSWORD` inputs plus a
 
 Remove all three bootstrap inputs from the runtime environment and recreate the app container after verifying login. Keep the administrator login secret separately; retain required CouchDB/session runtime secrets. See the [bootstrap policy](docs/ds925-production-readiness.md#administrator-initialization-and-collision-policy).
 
+For the current DS920+ transport proposal, use [restricted Unix-socket deployment preparation](docs/unix-socket-deployment.md). The earlier localhost-published HTTP backend has a confirmed bypass and must not be deployed for production authentication. NAS compatibility and direct LAN/tailnet denial remain manual acceptance gates.
+
 ## Known limitations
 - Legacy NAS files use role-based authorization; managed files use owner/selected-recipient grants. Department permissions and anonymous links are not implemented.
 - The app does not implement password reset. Public registration requires administrator approval.

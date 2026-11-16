@@ -1,0 +1,78 @@
+# Complete replacement candidate; never merge with a TCP-publishing file. Preparation only.
+services:
+  nginx:
+    image: ${PORTAL_NGINX_SOCKET_IMAGE:?Supply the verified immutable socket image}
+    container_name: portal-nginx
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: /volume1/docker/portal/nginx/nginx.conf
+        target: /etc/nginx/nginx.conf
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /volume1/docker/portal/files
+        target: /srv/portal-files
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /volume1/docker/portal/logs
+        target: /var/log/nginx
+        read_only: false
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${PORTAL_SOCKET_HOST_PATH:?Provision and verify the private socket directory}
+        target: /run/portal
+        read_only: false
+        bind:
+          create_host_path: false
+    depends_on:
+      - couchdb
+      - redis
+    environment:
+      PORTAL_SOCKET_GID: ${PORTAL_SOCKET_GID:?Verify the host Tailscale daemon group}
+    healthcheck:
+      test:
+        - CMD
+        - /usr/local/bin/portal-socket
+        - '--check'
+      interval: 10s
+      timeout: 3s
+      retries: 6
+  couchdb:
+    image: couchdb:3
+    container_name: portal-couchdb
+    restart: unless-stopped
+    environment:
+      COUCHDB_USER: ${COUCHDB_USER:?Privately verify the existing CouchDB administrator}
+      COUCHDB_PASSWORD: ${COUCHDB_PASSWORD:?Supply the existing verified credential without rotation}
+    volumes:
+      - type: bind
+        source: /volume1/docker/portal/couchdb/data
+        target: /opt/couchdb/data
+        read_only: false
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /volume1/docker/portal/couchdb/config
+        target: /opt/couchdb/etc/local.d
+        read_only: false
+        bind:
+          create_host_path: false
+    ports:
+      - 127.0.0.1:5984:5984
+  redis:
+    image: redis:7-alpine
+    container_name: portal-redis
+    restart: unless-stopped
+    command:
+      - redis-server
+      - '--save'
+      - ''
+      - '--appendonly'
+      - 'no'
+    ports:
+      - 127.0.0.1:6379:6379

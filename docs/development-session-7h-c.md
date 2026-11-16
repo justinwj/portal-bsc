@@ -1,0 +1,28 @@
+# Session 7H-C — eliminate the published HTTP backend
+
+Preparation only. Starting HEAD `f2347b4208a58a1da16e5d2cf8a5402bbb164152`, branch `codex/portal-bsc-r1-fixes`, matched the user-supplied commit. Final source/evidence commits and completed CI results will be recorded after verification. No NAS connection/deployment, live Serve/firewall/credential change, image publication, merge, database/volume/file deletion or bootstrap operation occurred.
+
+Read `AGENTS.md` and `.github/copilot-instructions.md` from `origin/master`. Preserved staged `.idea` files and unrelated `docs/development-session-7c-options.md`. [Starting CI 43800189759](https://github.com/justinwj/portal-bsc/actions/runs/43800189759) completed successfully at the starting SHA: 1008 executions / 675 distinct tests, zero failures, cancellations or skips.
+
+## Baseline and RED/GREEN
+
+Workstation Windows, Node 24.22.1, npm 11.19.1, Docker Desktop engine 29.9.2. CI uses Node 22/npm 10.9.9; production app dependencies and lockfile remain unchanged. Baseline `npm ci`, typecheck, **547 tests** and production build exited 0. npm 11 emitted the inherited bcrypt install-script review diagnostic; installation and tests completed. No dependency upgrade or diagnostic suppression was performed.
+
+1. Wrote `test/tooling/unix-proxy.test.cjs` before configuration implementation. Actual RED: **0 passed / 9 failed**, because the Unix renderer/complete Compose did not exist. Added the restricted transport/configuration candidate, shared only existing canonical-origin validation, and reran: **9 passed / 0 failed**. An intermediate run passed eight and failed one when initial file generation retained `8088:80`; corrected the complete file generation rather than weakening the no-published-port assertion. The fixture compares all three original Nginx mounts plus both unchanged dependency definitions.
+2. Version-source review exposed Nginx's explicit 0666 chmod. Disposable **stock Nginx 1.30.5** with umask 077 produced **666** versus required 660, exit **1**. The native launcher pre-binds 0660 and passes an inherited descriptor to the unchanged Nginx binary. Custom image compilation initially failed on a missing `sys/time.h` include; corrected the include and built successfully.
+3. Actual local Docker native suite first executed **13 cases: 11 passed / 2 failed**. One test sent duplicate curl Host headers instead of replacing a single forged value; one fixture's startup mkdir failed on restart. Corrected fixture request construction and made fixture directory initialization repeatable. No production assertions were relaxed. Rerun **13/13 passed**, including no TCP listeners, denied unrelated UID, permitted verified group, malformed forwarding rejection, reload, active collision refusal, unsafe filesystem rejection and SIGKILL stale-socket recovery.
+4. Local regression after implementation: **556/556 unit/HTTP/tooling**; typecheck/build exit 0; full/production audits both **zero findings**, exit 0; `npm ls --all` exit 0. Container/proxy and exact Docker24/Compose2.20.1 CI results pending in this source checkpoint; do not interpret these as live NAS tests.
+
+No application business logic/security control changed. No tests were deleted, skipped or disabled. Refactor shares canonical HTTPS-origin validation, separates the two explicit response modes, and keeps all transport health/recovery logic independent of Portal authorization. Existing TCP-profile tests remain historical regression coverage, not an approved deployment profile.
+
+## Architecture and operations
+
+See [Unix transport deployment and rollback](unix-socket-deployment.md) for version-specific primary sources, options considered, exact future commands, preservation checklist, permissions, downtime, secure rollback and manual NAS gates. Recommended: existing Serve HTTPS -> restricted Unix socket -> existing Nginx -> internal app. Initial three-service placeholder mode requires no app; later app mode preserves streaming/authentication, quotas, sharing and read-only NAS protections.
+
+The new custom Nginx image adds a small static launcher, no extra daemon or npm dependency, and retains the upstream Nginx 1.30.5 executable. The complete Compose removes Nginx publishing without newer merge/reset features, preserving original network, identities, all original binds and CouchDB/Redis settings. Root/Docker administration and socket-authorized host processes remain trusted. Synology package confinement and filesystem ACLs must be verified; no guessed trusted peer IP, package UID or network ID is supplied.
+
+## Files and outstanding verification
+
+Session files: `.github/workflows/ci.yml`, `Dockerfile.nginx-socket`, `deploy/ds920/compose.unix.yml`, `deploy/ds920/socket-launcher.c`, `deploy/ds920/nginx.unix.conf.template`, `deploy/ds920/nginx.unix-proxy-location.conf`, `scripts/render-unix-proxy.cjs`, `scripts/render-tailscale-proxy.cjs`, `test/tooling/unix-proxy.test.cjs`, `test/persistence/unix-socket.test.ts`, `test/persistence/ds920.test.ts`, this report, `docs/unix-socket-deployment.md`, current deployment-guide warnings and README link.
+
+Pending: completed new CI, real-service/container totals, exact Docker24/Compose2.20.1 evidence, final commit references. NAS acceptance remains unexecuted by design: actual Serve Unix access under package credentials/ACLs, LAN and tailnet 8088 refusal, no host listener, certificate/user grants, authoritative Container Manager project persistence, NAS boot/restart order, later NestJS deployment. Existing database loopback ports are preserved and require separate actual exposure review; localhost must not be assumed sufficient. Interactive Rider/Office and DSM acceptance are not claimed.

@@ -1,5 +1,9 @@
 # DS920+ Release 1 deployment preparation
 
+# Current transport requirement
+
+Session 7H-C supersedes the TCP/8088 backend proposal below: remote HTTP bypass remained reachable despite a loopback Docker bind. Follow [Unix-socket deployment preparation](unix-socket-deployment.md); production authentication remains blocked pending independent review and actual NAS denial/compatibility checks. Preserve existing records, network and mounts. Historical rollback instructions must not automatically restore a published HTTP port.
+
 **Review candidate only. No NAS connection, provisioning, transfer or deployment has been performed.** Session 7H-B authorizes [Tailscale HTTPS preparation](tailscale-deployment-preparation.md), **not deployment**; its approved direction supersedes the DSM preference retained below. The primary target is `jwj_NAS_1` (DS920+). DS925+ offsite backup/disaster recovery is deferred to **R2**; R1 must verify existing backup arrangements. The older [DS925 guide](ds925-production-readiness.md) is not the deployment definition for this populated DS920+.
 
 ## Preserve the existing project

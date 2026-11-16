@@ -1,5 +1,7 @@
 # Session 7H-B: private Tailscale HTTPS preparation
 
+**Superseded transport:** Session 7H-C confirmed that localhost publication still allowed tailnet HTTP access. Do not deploy this TCP-backend profile or rely on its port restrictions. Use the [restricted Unix-socket proposal and acceptance gates](unix-socket-deployment.md). This page remains historical evidence for the unchanged tailnet/account policy; live facts supplied in 7H-C supersede its unknown-version status.
+
 **Preparation only. No NAS connection, rule/service enablement, container deployment/restart, firewall/DNS change, credential rotation or image publication occurred. A future deployment requires separate explicit authorization.** This supersedes 7H-A's preferred DSM termination evaluation. DSM's Reverse Proxy list was confirmed empty by Justin; no DSM rule is needed for the preferred Serve path. DS920+ `jwj_NAS_1` is primary. DS925+ offsite backup/disaster recovery is **Release 2**, not a new R1 deployment dependency.
 
 ## Evidence and feasibility gate

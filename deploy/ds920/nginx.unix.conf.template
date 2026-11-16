@@ -1,0 +1,44 @@
+# PREPARATION ONLY: Serve v1.104.7 -> restricted inherited Unix listener.
+# Canonical Portal URL: @@ORIGIN@@
+worker_processes auto;
+error_log /var/log/nginx/error.log warn;
+events { worker_connections 1024; }
+http {
+    server_tokens off;
+    default_type application/octet-stream;
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    resolver_timeout 5s;
+    set_real_ip_from unix:;
+    real_ip_header X-Forwarded-For;
+    real_ip_recursive off;
+    map $http_host $portal_host { default 0; "localhost" 1; }
+    map $http_x_forwarded_host $portal_forwarded_host {
+        default 0;
+@@HOST_ENTRIES@@
+    }
+    map $http_x_forwarded_proto $portal_https { default 0; ~^https$ 1; }
+    map $http_x_forwarded_for $portal_single_client { default 0; "~^[0-9A-Fa-f:.]+$" 1; }
+    map $remote_addr $portal_client_valid { default 1; "unix:" 0; }
+    map $http_tailscale_funnel_request $portal_no_funnel { default 0; "" 1; }
+    log_format portal '$remote_addr peer=$realip_remote_addr [$time_local] "$request_method $uri" $status $body_bytes_sent';
+    access_log /var/log/nginx/access.log portal;
+@@UPSTREAM@@
+    server {
+        listen unix:/run/portal/portal.sock;
+        server_name @@HOSTNAME@@;
+        client_max_body_size 1000000000;
+        client_body_timeout 60s;
+        send_timeout 60s;
+        # Private socket liveness only; does not assert Serve/app readiness.
+        location = /__portal_proxy_health { return 204; }
+        location / {
+            if ($portal_host = 0) { return 403; }
+            if ($portal_forwarded_host = 0) { return 403; }
+            if ($portal_https = 0) { return 403; }
+            if ($portal_single_client = 0) { return 403; }
+            if ($portal_client_valid = 0) { return 403; }
+            if ($portal_no_funnel = 0) { return 403; }
+@@RESPONSE@@
+        }
+    }
+}

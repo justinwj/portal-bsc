@@ -1,0 +1,10 @@
+# Build on a workstation/CI. No change to the upstream Nginx executable.
+FROM nginx:1.30.5-alpine AS builder
+RUN apk add --no-cache build-base
+COPY deploy/ds920/socket-launcher.c /src/socket-launcher.c
+RUN cc -static -Os -Wall -Wextra -Werror -o /portal-socket /src/socket-launcher.c
+
+FROM nginx:1.30.5-alpine
+COPY --from=builder /portal-socket /usr/local/bin/portal-socket
+ENTRYPOINT ["/usr/local/bin/portal-socket"]
+CMD []

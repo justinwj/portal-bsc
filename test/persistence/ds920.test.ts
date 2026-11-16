@@ -419,4 +419,85 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
     assert.deepEqual((await served(`/download/${fileId}`,{cookie:serveOwner.cookie})).bytes,bytes);
     assert.equal((await compose(['ps','-q','nginx'])).stdout.trim(),originalProxyId);
   });
+  it('transitions only Nginx to an unpublished restricted Unix listener and preserves HTTPS placeholder without an app dependency',async()=>{
+    const infrastructureIds=await ids(), socket=join(directory,'socket');
+    await mkdir(socket);
+    // Only a positively owned disposable fixture; never a NAS path or ACL.
+    await exec('docker',['run','--rm','--mount',`type=bind,src=${socket},dst=/fixture`,'--entrypoint','sh','portal-nginx-socket:ci','-c','chown 0:101 /fixture && chmod 750 /fixture']);
+    const current=yaml.load(await readFile(base,'utf8'));
+    delete current.services.nginx.ports;
+    current.services.nginx.image='portal-nginx-socket:ci';
+    current.services.nginx.environment={PORTAL_SOCKET_GID:'101'};
+    current.services.nginx.volumes.push({type:'bind',source:socket,target:'/run/portal',read_only:false,bind:{create_host_path:false}});
+    await writeFile(base,yaml.dump(current));
+    const {renderUnixProxy}=require('../../scripts/render-unix-proxy.cjs');
+    await writeFile(activeProxyConfig,renderUnixProxy({PORTAL_PUBLIC_ORIGIN:`https://${serveHost}`,PORTAL_PROXY_RESPONSE_MODE:'placeholder'}));
+    const frontConfig=join(directory,'serve-front.conf');
+    let front=await readFile(frontConfig,'utf8');
+    front=front.replace('server nginx:80;','server unix:/run/portal/portal.sock;').replaceAll('proxy_set_header Host "$host";','proxy_set_header Host "localhost";');
+    await writeFile(frontConfig,front);
+    const frontFile=extraCompose.at(-1)!,frontDefinition=yaml.load(await readFile(frontFile,'utf8'));
+    frontDefinition.services['serve-front'].volumes.push({type:'bind',source:socket,target:'/run/portal',read_only:true,bind:{create_host_path:false}});
+    await writeFile(frontFile,yaml.dump(frontDefinition));
+    await compose(['up','-d','--no-deps','--force-recreate','nginx']);
+    await compose(['up','-d','--no-deps','--force-recreate','serve-front']);
+    servePort=Number((await compose(['port','serve-front','443'])).stdout.trim().split(':').pop());
+    await eventually(async()=>assert.equal((await served('/')).body,'portal nginx is running'),'Unix placeholder through real TLS frontend');
+    await compose(['exec','-T','nginx','portal-socket','--check']);
+    assert.deepEqual(await ids(),infrastructureIds);
+    assert.deepEqual(await client.use('portal_users').get('existing-admin'),beforeUser);
+    const container=JSON.parse((await exec('docker',['inspect',(await compose(['ps','-q','nginx'])).stdout.trim()])).stdout)[0];
+    assert.deepEqual(container.HostConfig.PortBindings,{});
+    const network=(Object.values(container.NetworkSettings.Networks)[0] as any).NetworkID;
+    const probe=await exec('docker',['run','--rm','--network',network,'--entrypoint','node','portal-bsc:ci','-e',
+      "Promise.all([80,8088].map(async p=>{try{await fetch('http://nginx:'+p,{signal:AbortSignal.timeout(2000)});process.exitCode=1}catch(e){if(e.cause?.code!=='ECONNREFUSED')throw e}}))"]);
+    assert.equal(probe.stderr,'');
+    await assert.rejects(fetch('http://127.0.0.1:8088/',{signal:AbortSignal.timeout(3000)}),error=>(error as any).cause?.code==='ECONNREFUSED');
+    console.log('Unix fixture: no published Nginx ports; container TCP 80/8088 and CI-host 8088 refuse connections. Not a live LAN/tailnet test.');
+  });
+  it('routes the actual production app over Unix transport with Secure sessions and rejects forged metadata',async()=>{
+    await writeFile(activeProxyConfig,require('../../scripts/render-unix-proxy.cjs').renderUnixProxy({PORTAL_PUBLIC_ORIGIN:`https://${serveHost}`,PORTAL_PROXY_RESPONSE_MODE:'app'}));
+    await compose(['exec','-T','nginx','nginx','-s','reload']);
+    await compose(['up','-d','--no-deps','--force-recreate','app']);
+    await eventually(async()=>assert.equal((await served('/healthz')).status,200),'Unix app readiness');
+    assert.equal((await served('/admin/users')).status,401);
+    for(const path of ['/__fixture/http','/__fixture/missing','/__fixture/invalid','/__fixture/multi','/__fixture/funnel','/__fixture/host']){
+      const result=await served(path);assert.equal(result.status,403,path);assert.equal(result.headers['set-cookie'],undefined);
+    }
+    serveOwner=await serveLogin();serveMember=await serveLogin('existing-member');
+    const observed=(await served('/healthz')).headers['x-test-observed-client'];
+    const events=(await client.use('portal_audit').list({include_docs:true})).rows.map((r:any)=>r.doc);
+    assert.ok(events.some((d:any)=>d.event==='login.success'&&d.userId==='existing-admin'&&d.ip===observed));
+    assert.equal((await served('/admin/users',{cookie:serveMember.cookie})).status,403);
+  });
+  it('preserves private file integrity, selective sharing and CSRF logout over the Unix path',async()=>{
+    assert.equal((await served(`/files/${fileId}`,{cookie:serveMember.cookie})).status,404);
+    assert.deepEqual((await served(`/download/${fileId}`,{cookie:serveOwner.cookie})).bytes,bytes);
+    assert.equal((await serveJson(serveOwner,`/files/${fileId}/sharing`,{recipientIds:['existing-member']})).status,303);
+    assert.deepEqual((await served(`/download/${fileId}`,{cookie:serveMember.cookie})).bytes,bytes);
+    assert.equal((await serveJson(serveOwner,`/files/${fileId}/sharing`,{recipientIds:[]})).status,303);
+    assert.equal((await served(`/download/${fileId}`,{cookie:serveMember.cookie})).status,404);
+    assert.equal((await served('/sentinel.txt',{cookie:serveOwner.cookie})).status,404);
+    for(const value of [{},{_csrf:'invalid'}])assert.equal((await served('/logout',{method:'POST',cookie:serveOwner.cookie,
+      headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams(value).toString()})).status,403);
+    assert.equal((await served('/logout',{method:'POST',cookie:serveOwner.cookie,headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({_csrf:serveOwner.csrf}).toString()})).status,302);
+    assert.equal((await served('/files',{cookie:serveOwner.cookie})).status,401);
+  });
+  it('retains secure transport after proxy restart and rolls back to the Unix placeholder without restoring TCP',async()=>{
+    const infrastructureIds=await ids();
+    await compose(['restart','nginx']);
+    await eventually(async()=>assert.equal((await served('/healthz')).status,200),'Unix restart readiness');
+    serveOwner=await serveLogin();
+    assert.deepEqual((await served(`/download/${fileId}`,{cookie:serveOwner.cookie})).bytes,bytes);
+    await writeFile(activeProxyConfig,require('../../scripts/render-unix-proxy.cjs').renderUnixProxy({PORTAL_PUBLIC_ORIGIN:`https://${serveHost}`,PORTAL_PROXY_RESPONSE_MODE:'placeholder'}));
+    await compose(['exec','-T','nginx','nginx','-s','reload']);
+    await compose(['stop','app']);
+    await eventually(async()=>assert.equal((await served('/')).body,'portal nginx is running'),'secure placeholder rollback');
+    assert.deepEqual(await ids(),infrastructureIds);
+    assert.deepEqual(await client.use('portal_users').get('existing-admin'),beforeUser);
+    assert.equal((await client.use('portal_audit').get('existing-history')).event,'test.preexisting');
+    await compose(['exec','-T','redis','redis-cli','ping']);
+    const container=JSON.parse((await exec('docker',['inspect',(await compose(['ps','-q','nginx'])).stdout.trim()])).stdout)[0];
+    assert.deepEqual(container.HostConfig.PortBindings,{});
+  });
 });
