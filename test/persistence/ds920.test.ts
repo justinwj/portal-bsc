@@ -66,6 +66,17 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
   async function ids() {
     return Promise.all(['couchdb', 'redis'].map(async service => (await compose(['ps', '-q', service])).stdout.trim()));
   }
+  async function connectToFixtureDatabase() {
+    const port = Number((await compose(['port', 'couchdb', '5984'], false)).stdout.trim().split(':').pop());
+    client = nano({ url: `http://127.0.0.1:${port}`, requestDefaults: { auth: { username: 'ci-admin', password } } });
+    await eventually(async () => assert.equal((await client.session()).userCtx.name, 'ci-admin'), 'existing database readiness');
+  }
+  async function ledgerDiagnostic() {
+    // Read-only diagnosis of synthetic fixtures; never print docs, environment or credentials.
+    const script = `require('reflect-metadata'); const {CouchDbService}=require('./dist/common/couchdb.service'); const {UsersService}=require('./dist/users/users.service'); const {ManagedStorage}=require('./dist/files/managed-storage.service'); (async()=>{const db=new CouchDbService();await db.initialize();const storage=new ManagedStorage(db,new UsersService(db));storage.root=process.env.PORTAL_UPLOADS_DIR;try{await storage.ledger();console.log('Read-only ledger diagnostic: consistent')}catch(e){console.log('Read-only ledger diagnostic: '+e.stack.split('\\n').slice(0,5).join(' | '))}})().catch(()=>{console.log('Read-only diagnostic dependency failed');process.exitCode=1});`;
+    const result = await compose(['exec', '-T', 'app', 'node', '-e', script]);
+    console.log(result.stdout.trim());
+  }
   async function ready() { await eventually(async () => assert.equal((await http('/healthz')).status, 200), 'TLS proxy and app readiness'); }
 
   before(async () => {
@@ -94,7 +105,9 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
         volumes: [bind(resolve('deploy/ds920/nginx.conf'), '/etc/nginx/nginx.conf', true),
           bind(join(directory, 'tls'), '/etc/nginx/portal-tls', true), bind(join(directory, 'logs'), '/var/log/nginx')] },
     }, networks: { 'portal-existing': { external: true, name: network } } }));
-    await writeFile(envFile, [ 'PORTAL_APP_IMAGE=portal-bsc:ci', `PORTAL_EXISTING_NETWORK=${network}`,
+    const imageId = (await exec('docker', ['image', 'inspect', '--format', '{{.Id}}', 'portal-bsc:ci'])).stdout.trim();
+    assert.match(imageId, /^sha256:[a-f0-9]{64}$/);
+    await writeFile(envFile, [ `PORTAL_APP_IMAGE=${imageId}`, `PORTAL_EXISTING_NETWORK=${network}`,
       `PORTAL_APP_UID=${process.getuid!()}`, `PORTAL_APP_GID=${process.getgid!()}`,
       `SESSION_SECRET=${randomUUID()}`, 'PORTAL_COUCHDB_URL=http://couchdb:5984', 'COUCHDB_USER=ci-admin',
       `COUCHDB_PASSWORD=${password}`, 'PORTAL_REDIS_URL=redis://redis:6379', `NAS_FILES_HOST_PATH=${join(directory, 'files')}`,
@@ -103,9 +116,7 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
     ].join('\n'), { flag: 'wx', mode: 0o600 });
     await exec('docker', ['network', 'create', network]); networkCreated = true; attempted = true;
     await compose(['up', '-d', 'couchdb', 'redis'], false);
-    const port = Number((await compose(['port', 'couchdb', '5984'], false)).stdout.trim().split(':').pop());
-    client = nano({ url: `http://127.0.0.1:${port}`, requestDefaults: { auth: { username: 'ci-admin', password } } });
-    await eventually(async () => assert.equal((await client.session()).userCtx.name, 'ci-admin'), 'existing database readiness');
+    await connectToFixtureDatabase();
     for (const db of ['portal_users', 'portal_files', 'portal_audit', 'portal_downloads']) await client.db.create(db);
     for (const [id, role] of [['existing-admin', 'admin'], ['existing-member', 'member']]) {
       await client.use('portal_users').insert({ _id: id, type: 'user', username: id, email: `${id}@example.test`,
@@ -121,8 +132,9 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
       if (attempted) await compose(['down', '--timeout', '15']); // Never remove volumes.
       if (networkCreated) await exec('docker', ['network', 'rm', network]);
     } finally {
-      // These are disposable CI fixtures created above, never an existing DB.
-      if (directory) { assert.ok(directory.startsWith(join(tmpdir(), 'portal-7h-'))); await rm(directory, { recursive: true, force: true }); }
+      // Retain bind-backed database files rather than changing CouchDB ownership
+      // or deleting a database for cleanup. The disposable hosted VM expires.
+      if (directory) assert.ok(directory.startsWith(join(tmpdir(), 'portal-7h-')));
     }
   });
 
@@ -148,7 +160,7 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
   it('routes TLS login/session/CSRF and rejects unauthenticated downloads and spoofed forwarding', async () => {
     const page = await http('/login', { headers: { 'X-Forwarded-Proto': 'http', 'X-Forwarded-For': '198.51.100.1' } });
     assert.equal(page.status, 200); assert.match(page.headers['set-cookie'][0], /; Secure/i);
-    assert.equal((await http('/download/nonexistent')).status, 302);
+    assert.equal((await http('/download/nonexistent')).status, 401);
     const a = await login();
     assert.equal((await json({ ...a, csrf: 'invalid' }, '/uploads/intents', {})).status, 403);
   });
@@ -172,6 +184,7 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
     assert.equal(file.sha256, createHash('sha256').update(bytes).digest('hex'));
     assert.deepEqual(file.sharedWithUserIds, []);
     const excess = await json(a, '/uploads/intents', { originalFilename: 'too-large.txt', title: 'excess', description: '', sizeBytes: '1000000000', idempotencyKey: randomUUID() });
+    if (excess.status !== 409) await ledgerDiagnostic();
     assert.equal(excess.status, 409, excess.body);
   });
   it('does not expose private metadata or permit direct Nginx NAS-file access', async () => {
@@ -213,7 +226,7 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
   });
   it('retains database bind data after CouchDB recreation and a fresh application start', async () => {
     await compose(['up', '-d', '--no-deps', '--force-recreate', 'couchdb']);
-    await eventually(async () => assert.equal((await client.session()).userCtx.name, 'ci-admin'), 'retained database readiness');
+    await connectToFixtureDatabase();
     await compose(['up', '-d', '--no-deps', '--force-recreate', 'app']); await ready();
     assert.deepEqual(await client.use('portal_users').get('existing-admin'), beforeUser);
     assert.equal((await client.use('portal_audit').get('existing-history')).event, 'test.preexisting');
