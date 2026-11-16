@@ -83,20 +83,31 @@ The renderer writes UTF-8 without BOM, refuses overwrite and requires an HTTPS D
 On the NAS, only after approval, populate a protected environment file with the existing privately verified CouchDB credentials, loaded image ID, verified socket GID/path. Do not source untrusted shell env files. Use an approved absolute environment-file path as `PORTAL_ENV_FILE`, verified CLI path as `PORTAL_TS_BIN`, and reviewed placeholder file path as `PORTAL_PLACEHOLDER_CONFIG` below. These are explicit operator variables, not inferred NAS state.
 
 ```sh
+set -eu
 cd /volume1/docker/portal
 # Verify these operator-set variables first; abort on missing values.
 : "${PORTAL_ENV_FILE:?}" "${PORTAL_TS_BIN:?}" "${PORTAL_SOCKET_HOST_PATH:?}"
 : "${PORTAL_PLACEHOLDER_CONFIG:?}"
-# Backup original compose.yaml/nginx/nginx.conf and Serve JSON PRIVATELY first.
+: "${PORTAL_BACKUP_DIR:?Choose a new private backup directory on verified local storage}"
+umask 077
+mkdir -m 700 "$PORTAL_BACKUP_DIR"
+cp -p compose.yaml "$PORTAL_BACKUP_DIR/compose.original.yaml"
+cp -p nginx/nginx.conf "$PORTAL_BACKUP_DIR/nginx.original.conf"
+cp -p "$PORTAL_ENV_FILE" "$PORTAL_BACKUP_DIR/runtime.env"
+"$PORTAL_TS_BIN" serve status --json > "$PORTAL_BACKUP_DIR/serve.original.json"
+docker inspect portal-nginx portal-couchdb portal-redis > "$PORTAL_BACKUP_DIR/containers.private.json"
 # Review complete compose.unix.yml, substitute no paths automatically.
 docker compose -p portal --env-file "$PORTAL_ENV_FILE" -f compose.unix.yml config --quiet
 ```
 
 Inspect the normalized configuration privately to confirm no Nginx ports, original identities/network and exact unchanged dependency binds/credentials. Do not print it to a shared log. Validate the image/config in a **separate disposable scratch socket directory**, not the live directory: the launcher `--test` binds safely and invokes `nginx -t`. Plain stock `nginx -t` on a missing Unix socket can itself create a 0666 socket. Do not run it on an inactive production path. Ensure the scratch container uses the reviewed image, config read-only bind and verified group; remove only that test container, never persistent data/volumes.
 
-Install the reviewed placeholder content at the existing `/volume1/docker/portal/nginx/nginx.conf` bind source using the approved backup-aware admin procedure. No container recreation has happened yet, so validate copied content/checksum before continuing. Use the complete replacement Compose, **not the original TCP file plus an overlay**:
+Install the reviewed placeholder content at the existing `/volume1/docker/portal/nginx/nginx.conf` bind source, preserving its inode and existing bind. No container recreation has happened yet, so validate copied content before continuing. Use the complete replacement Compose, **not the original TCP file plus an overlay**:
 
 ```sh
+test -f nginx/nginx.conf && test ! -L nginx/nginx.conf
+cat "$PORTAL_PLACEHOLDER_CONFIG" > nginx/nginx.conf
+cmp -s "$PORTAL_PLACEHOLDER_CONFIG" nginx/nginx.conf
 docker compose -p portal --env-file "$PORTAL_ENV_FILE" -f compose.unix.yml up -d --no-deps --force-recreate nginx
 docker exec portal-nginx /usr/local/bin/portal-socket --check
 docker inspect portal-nginx --format '{{json .HostConfig.PortBindings}}'
@@ -107,7 +118,7 @@ stat -c '%a %u %g %F' "$PORTAL_SOCKET_HOST_PATH" "$PORTAL_SOCKET_HOST_PATH/porta
 
 Only `nginx` is recreated, as required to remove the published port and add its socket mount/image. Do not recreate CouchDB or Redis. Do not run `serve reset`, change hostname, enable Funnel or request a new public hostname/certificate. Preserve unrelated Serve handlers; inspect the full saved status before replacing this specific HTTPS handler. Confirm the exact version's syntax/help first.
 
-Once accepted, make the complete reviewed Unix Compose the project's authoritative `/volume1/docker/portal/compose.yaml`, retaining the original only as a marked unsafe historical backup. Reconcile Container Manager's stored project definition with this complete file before any future Start/Update action; do not reset/recreate the project. Otherwise DSM could silently restore the old port after restart. Verify actual project startup behavior manually. Later app installation adds only `compose.app.yml` to this **Unix** base, after separate approval and readiness, then selects app-mode config. Do not add the app now.
+Once accepted, make the complete reviewed Unix Compose the project's authoritative `/volume1/docker/portal/compose.yaml` (`cat compose.unix.yml > compose.yaml`, then `cmp -s compose.unix.yml compose.yaml`), retaining the original only as a marked unsafe historical backup. Reconcile Container Manager's stored project definition **and protected environment-file loading** with this complete file before any future Start/Update action; do not reset/recreate the project. Otherwise DSM could silently restore the old port after restart or fail on missing variables. Verify actual project startup behavior manually. Later app installation adds only `compose.app.yml` to this **Unix** base, after separate approval and readiness, then selects app-mode config. Do not add the app now.
 
 ## Acceptance matrix — live checks still required
 
@@ -123,6 +134,6 @@ Once accepted, make the complete reviewed Unix Compose the project's authoritati
 
 The tested rollback is **Unix placeholder mode with the original three services**, retaining the restricted socket, no published Nginx port and all CouchDB/Redis binds/data. Restore the reviewed placeholder content at the existing config source, then `docker exec portal-nginx nginx -s reload`; verify socket health, HTTPS 200 placeholder, empty bindings and direct HTTP refusal. If app was later deployed, stop only `app` using the authoritative Unix base plus app overlay; do not remove files, records or volumes. CI exercises this transition with real persisted records and a production app image.
 
-If the socket image/config is broken, use the independent management path to restore the last tested socket image ID and placeholder config, then targeted `up -d --no-deps --force-recreate nginx`. If Synology package permissions make Unix transport unusable, **stop Nginx**, leave TCP unpublished and accept temporary HTTPS unavailability; retain Serve/certificate/status backups for review. Recover via DSM/approved SSH, not Portal. Do not broaden ACLs or expose HTTP to regain convenience. Restoring the original vulnerable TCP file/Serve target would reopen the confirmed bypass and needs a separately reviewed isolation/architecture decision; it is not an authorized automatic rollback.
+If the socket image/config is broken, use the independent management path to restore the last tested socket image ID and placeholder config, then targeted `up -d --no-deps --force-recreate nginx`. If Synology package permissions make Unix transport unusable, **stop Nginx** (`docker stop portal-nginx` works independently of Compose interpolation), leave TCP unpublished and accept temporary HTTPS unavailability; retain Serve/certificate/status backups for review. Recover via DSM/approved SSH, not Portal. Do not broaden ACLs or expose HTTP to regain convenience. Restoring the original vulnerable TCP file/Serve target would reopen the confirmed bypass and needs a separately reviewed isolation/architecture decision; it is not an authorized automatic rollback.
 
 NAS socket access, DSM package sandbox/ACLs, actual certificate, external user grants and NAS boot persistence remain manual gates. Linux container tests cannot establish them. Do not enable production authentication before acceptance and independent review.
