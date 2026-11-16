@@ -61,7 +61,7 @@ The development runner launches only complete, error-free builds, stops on compi
 
 ## Production deployment notes
 - Expect Redis and CouchDB to be internal services, not published publicly.
-- Use Nginx in front of the app for TLS termination and reverse proxying.
+- Keep Nginx in front of the app. For DS920+, preserve the existing `portal-nginx` HTTP mapping `8088:80`; HTTPS termination and DSM trusted-proxy configuration remain deployment-review decisions.
 - Set runtime secrets through protected environment variables or a deployment secret manager. `ADMIN_*` values are required only for explicit administrator bootstrap and should be removed from the runtime environment after verified initialization.
 - Production requires an existing, readable/searchable NAS directory; the app does not create a replacement and needs no NAS write access. Set `NAS_FILES_HOST_PATH` explicitly for the read-only Compose bind to `/var/lib/portal-bsc/files`; missing bind sources must fail.
 - The current production proposal targets **jwj_NAS_1 (DS920+)**. Follow [DS920+ preparation, backup, rollback and acceptance](docs/ds920-production-preparation.md); preserve its existing `portal` project and populated CouchDB bind mounts. Preparation is not deployment approval. DS925+ is the proposed backup destination/future standby; its [older readiness guide](docs/ds925-production-readiness.md) is historical deployment guidance.
@@ -70,7 +70,7 @@ The development runner launches only complete, error-free builds, stops on compi
 ## Docker and reverse proxy
 - `Dockerfile` uses a multi-stage build.
 - `docker-compose.app.yml` is intended for app orchestration behind an internal network.
-- `nginx/portal.conf` is an HTTP server-block example. The [DS920+ complete TLS configuration candidate](deploy/ds920/nginx.conf) requires reviewed certificate mounts and host-port mapping before use.
+- `nginx/portal.conf` is a server-block example. Use the [reconciled DS920+ HTTP routing proposal](deploy/ds920/nginx.http-proposal.conf) and [original-configuration review](docs/ds920-existing-configuration-review.md) for preparation. The earlier TLS-only candidate is unselected; production login still requires a separately approved HTTPS configuration.
 
 ## Admin bootstrap
 For registration approval, account deletion requests, retained records/files and workflow audits, see [Registration and account lifecycle](docs/account-lifecycle.md). See [Capacity and quota controls](docs/capacity-and-quotas.md) for active-user enforcement, decimal-GB policy/reporting and the explicit bootstrap exception. Managed uploads enforce confirmed per-user/global quotas at reservation and finalization; [the upload guide](docs/managed-uploads.md) documents scope and recovery limits.
