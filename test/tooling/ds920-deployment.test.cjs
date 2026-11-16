@@ -64,3 +64,11 @@ test('DS920 proxy streams bounded uploads without retrying writes or serving fil
   assert.match(config, /app:3000/);
   assert.doesNotMatch(config, /\b(alias|root|try_files|autoindex)\s/);
 });
+test('DS920 proxy retains upstream connections while refreshing recreated app addresses', () => {
+  const config = proxy();
+  assert.match(config, /upstream portal_application\s*\{/);
+  assert.match(config, /zone portal_application 64k;/);
+  assert.match(config, /server app:3000 resolve;/);
+  assert.match(config, /keepalive 8;/);
+  assert.match(config, /proxy_pass http:\/\/portal_application;/);
+});
