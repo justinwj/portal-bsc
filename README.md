@@ -64,13 +64,13 @@ The development runner launches only complete, error-free builds, stops on compi
 - Use Nginx in front of the app for TLS termination and reverse proxying.
 - Set runtime secrets through protected environment variables or a deployment secret manager. `ADMIN_*` values are required only for explicit administrator bootstrap and should be removed from the runtime environment after verified initialization.
 - Production requires an existing, readable/searchable NAS directory; the app does not create a replacement and needs no NAS write access. Set `NAS_FILES_HOST_PATH` explicitly for the read-only Compose bind to `/var/lib/portal-bsc/files`; missing bind sources must fail.
-- Follow [DS925+ readiness and NAS preflight](docs/ds925-production-readiness.md) before any separately approved deployment, including Container Manager/Compose compatibility checks.
+- The current production proposal targets **jwj_NAS_1 (DS920+)**. Follow [DS920+ preparation, backup, rollback and acceptance](docs/ds920-production-preparation.md); preserve its existing `portal` project and populated CouchDB bind mounts. Preparation is not deployment approval. DS925+ is the proposed backup destination/future standby; its [older readiness guide](docs/ds925-production-readiness.md) is historical deployment guidance.
 - Use [Managed uploads, sharing and recovery](docs/managed-uploads.md) for the opt-in `docker-compose.uploads.yml`, verified non-root UID/GID, storage marker, quota confirmation, scheduled antivirus and backup checks. Existing directories and explicit host paths are required; no NAS deployment is performed by this change.
 
 ## Docker and reverse proxy
 - `Dockerfile` uses a multi-stage build.
 - `docker-compose.app.yml` is intended for app orchestration behind an internal network.
-- `nginx/portal.conf` shows an example upstream service target of `http://app:3000` for Dockerized deployments.
+- `nginx/portal.conf` is an HTTP server-block example. The [DS920+ complete TLS configuration candidate](deploy/ds920/nginx.conf) requires reviewed certificate mounts and host-port mapping before use.
 
 ## Admin bootstrap
 For registration approval, account deletion requests, retained records/files and workflow audits, see [Registration and account lifecycle](docs/account-lifecycle.md). See [Capacity and quota controls](docs/capacity-and-quotas.md) for active-user enforcement, decimal-GB policy/reporting and the explicit bootstrap exception. Managed uploads enforce confirmed per-user/global quotas at reservation and finalization; [the upload guide](docs/managed-uploads.md) documents scope and recovery limits.

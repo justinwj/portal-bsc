@@ -1,5 +1,7 @@
 # DS925+ configuration and administrator bootstrap
 
+**Historical deployment candidate:** Session 7H-A now targets `jwj_NAS_1` (DS920+) as primary and DS925+ as the proposed backup/future standby. Use [DS920+ preparation](ds920-production-preparation.md) for the populated `portal` project. Do not apply this guide's named-volume example to the existing DS920+ CouchDB bind mount.
+
 These are requirements for a future, separately approved deployment. Session 4 did not connect to or deploy on the DS925+. CI verified the production image and Compose stack using disposable resources, not the NAS.
 
 Session 7G-B adds separately mounted managed uploads. Follow [Managed uploads, sharing and recovery](managed-uploads.md) for provisioning, explicit quota confirmation, owner-selected sharing, scheduled Antivirus Essential scanning and backup/restore checks. The legacy NAS mount below remains read-only. Actual DSM paths, identities, ACLs and installed Compose compatibility still require Justin's target-side verification; no NAS deployment is authorized by the development report.
