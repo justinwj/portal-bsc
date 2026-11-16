@@ -20,12 +20,16 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
   let directory: string, base: string, envFile: string, proxyPort: number, client: any;
   let attempted = false, fileId: string, originalIds: string[], originalProxyId: string, beforeUser: any;
   let activeProxyConfig: string;
+  const extraCompose: string[] = [];
+  const serveHost = 'portal-ci.example.test'; // Synthetic fixture, never a NAS hostname.
+  let servePort: number, serveCa: Buffer;
+  let serveOwner: {cookie: string; csrf: string}, serveMember: {cookie: string; csrf: string};
   const bytes = Buffer.from('disposable private deployment fixture');
   const overlay = resolve('deploy/ds920/compose.app.yml');
 
   function compose(args: string[], merged = true, extra: Record<string, string> = {}) {
     return exec('docker', ['compose', '-p', project, '--env-file', envFile, '-f', base,
-      ...(merged ? ['-f', overlay] : []), ...args], {
+      ...(merged ? ['-f', overlay, ...extraCompose.flatMap(file => ['-f', file])] : []), ...args], {
       env: { ...process.env, ...extra }, timeout: 90000, maxBuffer: 1024 * 1024,
     });
   }
@@ -74,6 +78,29 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
     await eventually(async () => assert.equal((await client.session()).userCtx.name, 'ci-admin'), 'existing database readiness');
   }
   async function ready() { await eventually(async () => assert.equal((await http('/healthz')).status, 200), 'TLS proxy and app readiness'); }
+  function served(path: string, options: {method?: string; cookie?: string; body?: string; headers?: Record<string,string>; servername?: string} = {}) {
+    return new Promise<{status:number;headers:any;body:string;bytes:Buffer}>((resolveResult,reject)=>{
+      const req=request({hostname:'127.0.0.1',port:servePort,path,servername:options.servername??serveHost,ca:serveCa,rejectUnauthorized:true,
+        method:options.method??'GET',headers:{Host:serveHost,...(options.cookie?{Cookie:options.cookie}:{}),...options.headers}},res=>{
+        const chunks:Buffer[]=[];res.on('data',chunk=>chunks.push(chunk));res.on('error',reject);
+        res.on('end',()=>{const bytes=Buffer.concat(chunks);resolveResult({status:res.statusCode!,headers:res.headers,body:bytes.toString(),bytes});});
+      });req.on('error',reject);req.setTimeout(10000,()=>req.destroy(new Error('Proxy-chain deadline')));req.end(options.body);
+    });
+  }
+  async function serveLogin(username='existing-admin') {
+    const page=await served('/login',{headers:{'X-Forwarded-For':'198.51.100.99','X-Forwarded-Proto':'http'}});
+    assert.equal(page.status,200,page.body);
+    const cookie=page.headers['set-cookie'][0].split(';')[0];
+    for(const flag of [/; Secure/i,/; HttpOnly/i,/; SameSite=Lax/i])assert.match(page.headers['set-cookie'][0],flag);
+    const login=await served('/login',{method:'POST',cookie,headers:{'content-type':'application/x-www-form-urlencoded'},
+      body:new URLSearchParams({username,password,_csrf:formToken(page.body)}).toString()});
+    assert.equal(login.status,302);assert.equal(login.headers.location,'/');
+    const active=login.headers['set-cookie'][0].split(';')[0];
+    const dashboard=await served('/',{cookie:active});assert.equal(dashboard.status,200);
+    return{cookie:active,csrf:formToken(dashboard.body)};
+  }
+  function serveJson(actor:{cookie:string;csrf:string},path:string,value:any){return served(path,{method:'POST',cookie:actor.cookie,
+    headers:{'content-type':'application/json','x-csrf-token':actor.csrf},body:JSON.stringify(value)});}
 
   before(async () => {
     assert.equal(process.env.GITHUB_ACTIONS, 'true', 'Use disposable GitHub-hosted Linux resources');
@@ -285,5 +312,94 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
     assert.equal((await compose(['port', 'nginx', '80'])).stdout.trim(), binding);
     assert.deepEqual(await ids(), infrastructureIds);
     assert.deepEqual(await client.use('portal_users').get('existing-admin'), beforeUser);
+  });
+  it('validates a real TLS two-proxy contract and preserves Secure Portal sessions and observed client IP', async()=>{
+    // Real Nginx models the reviewed Serve header contract. This is NOT live
+    // Tailscale, a tailnet grant test, or evidence of Synology compatibility.
+    const cert=join(directory,'tls/serve.crt'),key=join(directory,'tls/serve.key');
+    await exec('openssl',['req','-x509','-newkey','rsa:2048','-nodes','-days','1','-subj',`/CN=${serveHost}`,
+      '-addext',`subjectAltName=DNS:${serveHost}`,'-keyout',key,'-out',cert]);serveCa=await readFile(cert);
+    const location=(path:string,headers:Record<string,string>={})=>{
+      const fields={Host:'$host','X-Forwarded-Host':'$host','X-Forwarded-Proto':'$scheme','X-Forwarded-For':'$remote_addr','Tailscale-Funnel-Request':'',...headers};
+      return `location ${path} { proxy_pass http://backend${path==='/'?'':'/login'}; proxy_http_version 1.1; proxy_set_header Connection ""; ${Object.entries(fields).map(([name,value])=>`proxy_set_header ${name} "${value}";`).join(' ')} }`;
+    };
+    const frontConfig=join(directory,'serve-front.conf');
+    await writeFile(frontConfig,`events {worker_connections 128;} http {upstream backend {server nginx:80;keepalive 8;} server {listen 443 ssl;server_name ${serveHost};ssl_certificate /tls/serve.crt;ssl_certificate_key /tls/serve.key;add_header X-Test-Observed-Client $remote_addr always;
+      ${location('/')}${location('/__fixture/http',{'X-Forwarded-Proto':'http'})}${location('/__fixture/missing',{'X-Forwarded-For':''})}
+      ${location('/__fixture/invalid',{'X-Forwarded-For':'invalid'})}${location('/__fixture/multi',{'X-Forwarded-For':'192.0.2.1, 192.0.2.2'})}
+      ${location('/__fixture/funnel',{'Tailscale-Funnel-Request':'?1'})}${location('/__fixture/host',{'X-Forwarded-Host':'wrong.example.test'})} }}`);
+    const frontCompose=join(directory,'serve.ci.yml');
+    await writeFile(frontCompose,yaml.dump({services:{'serve-front':{image:'nginx:stable-alpine',ports:['127.0.0.1::443'],volumes:[
+      {type:'bind',source:frontConfig,target:'/etc/nginx/nginx.conf',read_only:true,bind:{create_host_path:false}},
+      {type:'bind',source:join(directory,'tls'),target:'/tls',read_only:true,bind:{create_host_path:false}},
+    ]}}}));extraCompose.push(frontCompose);
+    await compose(['up','-d','--no-deps','serve-front']);
+    const frontId=(await compose(['ps','-q','serve-front'])).stdout.trim();
+    const container=JSON.parse((await exec('docker',['inspect',frontId])).stdout)[0];
+    const peer=(Object.values(container.NetworkSettings.Networks)[0] as any).IPAddress;
+    assert.ok(peer,'Observe the actual disposable proxy address');
+    const {renderTailscaleProxy}=require('../../scripts/render-tailscale-proxy.cjs');
+    await writeFile(activeProxyConfig,renderTailscaleProxy({PORTAL_PUBLIC_ORIGIN:`https://${serveHost}`,PORTAL_SERVE_PROXY_PEERS:peer}));
+    await compose(['exec','-T','nginx','nginx','-t']);await compose(['exec','-T','nginx','nginx','-s','reload']);
+    // Reset the per-process test rate bucket while preserving real Redis/data.
+    await compose(['up','-d','--no-deps','--force-recreate','app']);
+    servePort=Number((await compose(['port','serve-front','443'])).stdout.trim().split(':').pop());
+    await eventually(async()=>assert.equal((await served('/healthz')).status,200),'TLS proxy-chain readiness');
+    await assert.rejects(served('/healthz',{servername:'wrong.example.test'}),/Hostname|altname|certificate/i);
+    assert.equal((await served('/admin/users',{headers:{'Tailscale-User-Login':'existing-admin'}})).status,401,'Network identity is never Portal SSO');
+    serveOwner=await serveLogin();serveMember=await serveLogin('existing-member');
+    const audit=(await client.use('portal_audit').list({include_docs:true})).rows.map((r:any)=>r.doc).filter((d:any)=>d.event==='login.success'&&d.userId==='existing-admin').at(-1);
+    // IDs are unordered; find any newly observed client IP rather than assuming ID order.
+    const observed=(await served('/healthz')).headers['x-test-observed-client'];
+    const events=(await client.use('portal_audit').list({include_docs:true})).rows.map((r:any)=>r.doc);
+    assert.ok(events.some((d:any)=>d.event==='login.success'&&d.userId==='existing-admin'&&d.ip===observed));
+    assert.notEqual(observed,'198.51.100.99');assert.ok(audit);
+  });
+  it('rejects direct backend spoofing, malformed trusted headers, wrong canonical hosts and Funnel-marked traffic',async()=>{
+    const port=Number((await compose(['port','nginx','80'])).stdout.trim().split(':').pop());
+    const direct=await fetch(`http://127.0.0.1:${port}/login`,{headers:{Host:serveHost,'X-Forwarded-Host':serveHost,'X-Forwarded-Proto':'https','X-Forwarded-For':'192.0.2.1'}});
+    assert.equal(direct.status,403);assert.equal(direct.headers.get('set-cookie'),null);
+    for(const path of ['/__fixture/http','/__fixture/missing','/__fixture/invalid','/__fixture/multi','/__fixture/funnel','/__fixture/host']){
+      const result=await served(path);assert.equal(result.status,403,path);assert.equal(result.headers['set-cookie'],undefined,path);
+    }
+    assert.equal((await served('/login',{headers:{Host:'wrong.example.test'}})).status,403);
+    const nginxId=(await compose(['ps','-q','nginx'])).stdout.trim();
+    const info=JSON.parse((await exec('docker',['inspect',nginxId])).stdout)[0];
+    const network=(Object.values(info.NetworkSettings.Networks)[0] as any).NetworkID;
+    const probe=await exec('docker',['run','--rm','--network',network,'--entrypoint','node','portal-bsc:ci','-e',
+      `fetch('http://nginx/login',{headers:{Host:'${serveHost}','X-Forwarded-Host':'${serveHost}','X-Forwarded-Proto':'https','X-Forwarded-For':'192.0.2.1'}}).then(r=>{console.log(r.status);if(r.status!==403)process.exitCode=1})`]);
+    assert.equal(probe.stdout.trim(),'403');
+  });
+  it('preserves role guards, private downloads, sharing revocation and disabled-session rejection through the proxy chain',async()=>{
+    assert.equal((await served('/admin/users',{cookie:serveMember.cookie})).status,403);
+    assert.equal((await served('/admin/users',{cookie:serveOwner.cookie})).status,200);
+    assert.equal((await served(`/files/${fileId}`,{cookie:serveMember.cookie})).status,404);
+    assert.deepEqual((await served(`/download/${fileId}`,{cookie:serveOwner.cookie})).bytes,bytes);
+    assert.equal((await serveJson(serveOwner,`/files/${fileId}/sharing`,{recipientIds:['existing-member']})).status,303);
+    assert.deepEqual((await served(`/download/${fileId}`,{cookie:serveMember.cookie})).bytes,bytes);
+    assert.equal((await serveJson(serveOwner,`/files/${fileId}/sharing`,{recipientIds:[]})).status,303);
+    assert.equal((await served(`/download/${fileId}`,{cookie:serveMember.cookie})).status,404);
+    const status=async(action:string,value:any)=>served(`/admin/users/existing-member/${action}`,{method:'POST',cookie:serveOwner.cookie,
+      headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({...value,_csrf:serveOwner.csrf}).toString()});
+    assert.equal((await status('disable',{confirmed:'yes'})).status,302);
+    assert.equal((await served('/files',{cookie:serveMember.cookie})).status,401);
+    assert.equal((await status('enable',{})).status,302);
+    assert.equal((await served('/files',{cookie:serveMember.cookie})).status,401);
+    serveMember=await serveLogin('existing-member');
+  });
+  it('preserves CSRF logout validation and destroys a real Redis session through the proxy chain',async()=>{
+    for(const value of [{},{_csrf:'invalid'}])assert.equal((await served('/logout',{method:'POST',cookie:serveOwner.cookie,
+      headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams(value).toString()})).status,403);
+    assert.equal((await served('/logout',{method:'POST',cookie:serveOwner.cookie,headers:{'content-type':'application/x-www-form-urlencoded'},
+      body:new URLSearchParams({_csrf:serveOwner.csrf}).toString()})).status,302);
+    assert.equal((await served('/files',{cookie:serveOwner.cookie})).status,401);
+    serveOwner=await serveLogin();
+  });
+  it('retains proxy configuration, sessions and private bytes after disposable proxy/app restart',async()=>{
+    await compose(['restart','serve-front']);await compose(['up','-d','--no-deps','--force-recreate','app']);
+    await eventually(async()=>assert.equal((await served('/healthz')).status,200),'restarted proxy-chain readiness');
+    assert.equal((await served('/files',{cookie:serveOwner.cookie})).status,200);
+    assert.deepEqual((await served(`/download/${fileId}`,{cookie:serveOwner.cookie})).bytes,bytes);
+    assert.equal((await compose(['ps','-q','nginx'])).stdout.trim(),originalProxyId);
   });
 });

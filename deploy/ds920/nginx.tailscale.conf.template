@@ -1,0 +1,80 @@
+# UNSELECTED preparation template: render offline only after live compatibility,
+# source-address and backend-isolation verification. No actual NAS values supplied.
+# Canonical Portal URL: @@ORIGIN@@
+# Preserve existing 8088:80, mounts, container identity and compiled PID path.
+worker_processes auto;
+error_log /var/log/nginx/error.log warn;
+events { worker_connections 1024; }
+http {
+    server_tokens off;
+    default_type application/octet-stream;
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    resolver_timeout 5s;
+@@REAL_IP_SOURCES@@
+    real_ip_header X-Forwarded-For;
+    real_ip_recursive off;
+    geo $realip_remote_addr $portal_trusted_peer {
+        default 0;
+@@PEER_ENTRIES@@
+    }
+    geo $remote_addr $portal_client_is_peer {
+        default 0;
+@@PEER_ENTRIES@@
+    }
+    map $http_x_forwarded_proto $portal_https { default 0; ~^https$ 1; }
+    map $http_x_forwarded_for $portal_single_client { default 0; "~^[0-9A-Fa-f:.]+$" 1; }
+    map $http_host $portal_host {
+        default 0;
+@@HOST_ENTRIES@@
+    }
+    map $http_x_forwarded_host $portal_forwarded_host {
+        default 0;
+@@HOST_ENTRIES@@
+    }
+    map $http_tailscale_funnel_request $portal_no_funnel { default 0; "" 1; }
+    log_format portal '$remote_addr peer=$realip_remote_addr [$time_local] "$request_method $uri" $status $body_bytes_sent';
+    access_log /var/log/nginx/access.log portal;
+    upstream portal_application {
+        zone portal_application 64k;
+        server app:3000 resolve;
+        keepalive 8;
+    }
+    server {
+        listen 80;
+        server_name @@HOSTNAME@@;
+        if ($portal_trusted_peer = 0) { return 403; }
+        if ($portal_https = 0) { return 403; }
+        if ($portal_host = 0) { return 403; }
+        if ($portal_forwarded_host = 0) { return 403; }
+        if ($portal_single_client = 0) { return 403; }
+        if ($portal_client_is_peer = 1) { return 403; }
+        if ($portal_no_funnel = 0) { return 403; }
+        client_max_body_size 1000000000;
+        client_body_timeout 60s;
+        send_timeout 60s;
+        location / {
+            proxy_pass http://portal_application;
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            proxy_set_header Host "@@HOST@@";
+            proxy_set_header X-Forwarded-Host "@@HOST@@";
+            proxy_set_header X-Forwarded-Port "@@PORT@@";
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_set_header X-Forwarded-For $remote_addr;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header Forwarded "";
+            proxy_set_header Tailscale-User-Login "";
+            proxy_set_header Tailscale-User-Name "";
+            proxy_set_header Tailscale-User-Profile-Pic "";
+            proxy_set_header Tailscale-App-Capabilities "";
+            proxy_set_header Tailscale-Headers-Info "";
+            proxy_set_header Tailscale-Funnel-Request "";
+            proxy_request_buffering off;
+            proxy_buffering off;
+            proxy_next_upstream off;
+            proxy_connect_timeout 5s;
+            proxy_read_timeout 3600s;
+            proxy_send_timeout 3600s;
+        }
+    }
+}
