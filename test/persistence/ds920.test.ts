@@ -12,13 +12,13 @@ import { formToken } from '../integration/support';
 
 const exec = promisify(execFile), yaml = require('js-yaml'), nano = require('nano'), bcrypt = require('bcrypt');
 
-// A disposable model of the reported THREE-container infrastructure, not an
-// assertion about the uninspected NAS YAML. Never accesses either NAS or .env.
+// Disposable model of the supplied implicit-default-network infrastructure.
+// NAS identities/paths are checked by config parsing only, never instantiated.
 describe('DS920 additive deployment with existing bind-backed infrastructure', { concurrency: false, timeout: 240000 }, () => {
-  const project = `portal-7h-${randomUUID()}`, network = `${project}-existing`, storageId = randomUUID();
+  const project = `portal-7h-${randomUUID()}`, storageId = randomUUID();
   const password = 'DisposableDeploymentPassword123';
   let directory: string, base: string, envFile: string, proxyPort: number, client: any;
-  let attempted = false, networkCreated = false, fileId: string, originalIds: string[], beforeUser: any;
+  let attempted = false, fileId: string, originalIds: string[], originalProxyId: string, beforeUser: any;
   let activeProxyConfig: string;
   const bytes = Buffer.from('disposable private deployment fixture');
   const overlay = resolve('deploy/ds920/compose.app.yml');
@@ -90,30 +90,31 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
       '-keyout', join(directory, 'tls/tls.key'), '-out', join(directory, 'tls/tls.crt')]);
     base = join(directory, 'existing.yml'); envFile = join(directory, 'protected.env');
     activeProxyConfig = join(directory, 'nginx.conf');
-    await writeFile(activeProxyConfig, await readFile(resolve('deploy/ds920/nginx.conf')));
+    await writeFile(activeProxyConfig, await readFile(resolve('deploy/ds920/nginx.original-placeholder.conf')));
     const bind = (source: string, target: string, read_only = false) => ({ type: 'bind', source, target, read_only, bind: { create_host_path: false } });
     // Production candidate inherits the original services; only this CI model
     // supplies their definitions and temporary loopback diagnostics ports.
     await writeFile(base, yaml.dump({ services: {
-      couchdb: { image: 'couchdb:3', user: '5984:5984', environment: { COUCHDB_USER: 'ci-admin', COUCHDB_PASSWORD: password },
+      couchdb: { image: 'couchdb:3', environment: { COUCHDB_USER: 'ci-admin', COUCHDB_PASSWORD: password },
         volumes: [bind(join(directory, 'data'), '/opt/couchdb/data'), bind(join(directory, 'config'), '/opt/couchdb/etc/local.d')],
-        ports: ['127.0.0.1::5984'], networks: ['portal-existing'] },
-      redis: { image: 'redis:7-alpine', networks: ['portal-existing'] },
-      nginx: { image: 'nginx:stable-alpine', ports: ['127.0.0.1::443', '127.0.0.1::80'], networks: ['portal-existing'],
+        ports: ['127.0.0.1::5984'] },
+      redis: { image: 'redis:7-alpine', command: ['redis-server', '--save', '', '--appendonly', 'no'] },
+      nginx: { image: 'nginx:stable-alpine', ports: ['127.0.0.1::443', '127.0.0.1::80'], depends_on: ['couchdb', 'redis'],
         volumes: [bind(activeProxyConfig, '/etc/nginx/nginx.conf', true),
           bind(join(directory, 'tls'), '/etc/nginx/portal-tls', true), bind(join(directory, 'logs'), '/var/log/nginx')] },
-    }, networks: { 'portal-existing': { external: true, name: network } } }));
+    } }));
     const imageId = (await exec('docker', ['image', 'inspect', '--format', '{{.Id}}', 'portal-bsc:ci'])).stdout.trim();
     assert.match(imageId, /^sha256:[a-f0-9]{64}$/);
-    await writeFile(envFile, [ `PORTAL_APP_IMAGE=${imageId}`, `PORTAL_EXISTING_NETWORK=${network}`,
+    await writeFile(envFile, [ `PORTAL_APP_IMAGE=${imageId}`,
       `PORTAL_APP_UID=${process.getuid!()}`, `PORTAL_APP_GID=${process.getgid!()}`,
       `SESSION_SECRET=${randomUUID()}`, 'PORTAL_COUCHDB_URL=http://couchdb:5984', 'COUCHDB_USER=ci-admin',
       `COUCHDB_PASSWORD=${password}`, 'PORTAL_REDIS_URL=redis://redis:6379', `NAS_FILES_HOST_PATH=${join(directory, 'files')}`,
       `PORTAL_UPLOADS_HOST_PATH=${join(directory, 'managed')}`, `PORTAL_UPLOADS_STORAGE_ID=${storageId}`,
       'PORTAL_UPLOAD_MIN_FREE_BYTES=1048576',
     ].join('\n'), { flag: 'wx', mode: 0o600 });
-    await exec('docker', ['network', 'create', network]); networkCreated = true; attempted = true;
-    await compose(['up', '-d', 'couchdb', 'redis'], false);
+    attempted = true;
+    await compose(['up', '-d', 'nginx', 'couchdb', 'redis'], false);
+    originalProxyId = (await compose(['ps', '-q', 'nginx'], false)).stdout.trim();
     await connectToFixtureDatabase();
     for (const db of ['portal_users', 'portal_files', 'portal_audit', 'portal_downloads']) await client.db.create(db);
     for (const [id, role] of [['existing-admin', 'admin'], ['existing-member', 'member']]) {
@@ -128,7 +129,6 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
   after(async () => {
     try {
       if (attempted) await compose(['down', '--timeout', '15']); // Never remove volumes.
-      if (networkCreated) await exec('docker', ['network', 'rm', network]);
     } finally {
       // Retain bind-backed database files rather than changing CouchDB ownership
       // or deleting a database for cleanup. The disposable hosted VM expires.
@@ -144,13 +144,33 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
     assert.ok(!merged.volumes);
     assert.ok(!merged.services.app.ports);
     assert.equal(merged.services.couchdb.volumes.find((m: any) => m.target === '/opt/couchdb/data').source, join(directory, 'data'));
+    for (const name of ['nginx', 'couchdb', 'redis', 'app']) assert.deepEqual(Object.keys(merged.services[name].networks), ['default']);
+  });
+  it('reconciles the supplied NAS paths, identities and loopback bindings without executing a NAS stack', async () => {
+    const result = await exec('docker', ['compose', '-p', 'portal', '--env-file', envFile,
+      '-f', resolve('deploy/ds920/compose.infrastructure.yml'), '-f', overlay, 'config', '--format', 'json'],
+      { timeout: 15000, maxBuffer: 1024 * 1024 });
+    const config = JSON.parse(result.stdout);
+    assert.equal(config.name, 'portal'); assert.ok(!config.volumes);
+    assert.equal(config.services.nginx.container_name, 'portal-nginx');
+    assert.equal(config.services.nginx.ports[0].published, '8088');
+    assert.equal(config.services.nginx.ports[0].target, 80);
+    for (const name of ['couchdb', 'redis']) assert.equal(config.services[name].ports[0].host_ip, '127.0.0.1');
+    assert.equal(config.services.couchdb.volumes.find((m: any) => m.target === '/opt/couchdb/data').source, '/volume1/docker/portal/couchdb/data');
+    assert.equal(config.services.couchdb.volumes.find((m: any) => m.target === '/opt/couchdb/etc/local.d').source, '/volume1/docker/portal/couchdb/config');
+    for (const name of ['nginx', 'couchdb', 'redis', 'app']) assert.deepEqual(Object.keys(config.services[name].networks), ['default']);
+    assert.equal(Object.keys(config.networks).length, 1);
+    assert.ok(!config.services.app.ports);
   });
   it('starts the fourth container without recreating CouchDB/Redis or changing existing accounts/history', async () => {
     await compose(['up', '-d', '--no-deps', 'app']);
     assert.deepEqual(await ids(), originalIds);
     assert.deepEqual(await client.use('portal_users').get('existing-admin'), beforeUser);
     assert.equal((await client.use('portal_audit').get('existing-history')).event, 'test.preexisting');
-    await compose(['up', '-d', '--no-deps', 'nginx']);
+    assert.equal((await compose(['ps', '-q', 'nginx'])).stdout.trim(), originalProxyId);
+    await writeFile(activeProxyConfig, await readFile(resolve('deploy/ds920/nginx.conf')));
+    await compose(['exec', '-T', 'nginx', 'nginx', '-t']);
+    await compose(['exec', '-T', 'nginx', 'nginx', '-s', 'reload']);
     proxyPort = Number((await compose(['port', 'nginx', '443'])).stdout.trim().split(':').pop());
     await ready();
     await compose(['exec', '-T', 'nginx', 'nginx', '-t']);
@@ -261,6 +281,7 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
     assert.equal((await plain(`/download/${fileId}`)).status, 401);
     assert.equal((await plain('/sentinel.txt')).status, 404);
     assert.equal((await compose(['ps', '-q', 'nginx'])).stdout.trim(), containerId);
+    assert.equal(containerId, originalProxyId);
     assert.equal((await compose(['port', 'nginx', '80'])).stdout.trim(), binding);
     assert.deepEqual(await ids(), infrastructureIds);
     assert.deepEqual(await client.use('portal_users').get('existing-admin'), beforeUser);

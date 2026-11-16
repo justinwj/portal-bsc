@@ -17,14 +17,13 @@ test('DS920 addition cannot replace existing database, cache, proxy or persisten
   assert.equal(config.services.app.pull_policy, 'never', 'Only a verified locally loaded image may start');
   assert.match(config.services.app.image, /\$\{PORTAL_APP_IMAGE:\?/);
 });
-test('DS920 application is internal, non-root and joins only the verified existing network', () => {
+test('DS920 application is internal, non-root and inherits the original implicit default network', () => {
   const config = deployment(), app = config.services.app;
   assert.equal(app.ports, undefined);
   assert.equal(app.platform, 'linux/amd64');
   assert.match(app.user, /PORTAL_APP_UID:\?.*PORTAL_APP_GID:\?/);
-  assert.deepEqual(app.networks, ['portal-existing']);
-  assert.equal(config.networks['portal-existing'].external, true);
-  assert.match(config.networks['portal-existing'].name, /PORTAL_EXISTING_NETWORK:\?/);
+  assert.deepEqual(app.networks, ['default']);
+  assert.equal(config.networks, undefined, 'Do not define a competing network or assume a NAS network name');
   assert.deepEqual(app.cap_drop, ['ALL']);
   assert.ok(app.security_opt.includes('no-new-privileges:true'));
 });
@@ -78,6 +77,7 @@ test('DS920 HTTP routing proposal supports the existing frontend without selecti
   assert.match(config, /events\s*\{/);
   assert.match(config, /http\s*\{/);
   assert.match(config, /listen 80;/);
+  assert.match(config, /worker_connections 1024;/);
   assert.doesNotMatch(config, /listen\s+(443|8088)\b|ssl_certificate|\bssl_protocols/);
   assert.match(config, /proxy_pass http:\/\/portal_application;/);
   assert.match(config, /server app:3000 resolve;/);
@@ -94,4 +94,39 @@ test('DS920 HTTP routing cannot spoof HTTPS, bypass file authorization or regres
   assert.match(config, /proxy_buffering off;/);
   assert.match(config, /proxy_next_upstream off;/);
   assert.doesNotMatch(config, /\b(alias|root|try_files|autoindex)\s/);
+});
+test('DS920 reference preserves the supplied three-service identities, ports, commands and all five existing binds', () => {
+  const config = yaml.load(readFileSync(join(root, 'deploy/ds920/compose.infrastructure.yml'), 'utf8'));
+  assert.deepEqual(Object.keys(config.services).sort(), ['couchdb', 'nginx', 'redis']);
+  assert.equal(config.networks, undefined);
+  assert.equal(config.volumes, undefined);
+  for (const [name, image] of [['nginx', 'nginx:stable-alpine'], ['couchdb', 'couchdb:3'], ['redis', 'redis:7-alpine']]) {
+    assert.equal(config.services[name].image, image);
+    assert.equal(config.services[name].container_name, `portal-${name}`);
+    assert.equal(config.services[name].restart, 'unless-stopped');
+    assert.equal(config.services[name].user, undefined, 'Preserve existing service user configuration');
+  }
+  assert.deepEqual(config.services.nginx.ports, ['8088:80']);
+  assert.deepEqual(config.services.couchdb.ports, ['127.0.0.1:5984:5984']);
+  assert.deepEqual(config.services.redis.ports, ['127.0.0.1:6379:6379']);
+  assert.deepEqual(config.services.redis.command, ['redis-server', '--save', '', '--appendonly', 'no']);
+  assert.deepEqual(config.services.nginx.depends_on, ['couchdb', 'redis']);
+  const mounts = name => config.services[name].volumes.map(m => {
+    assert.equal(m.type, 'bind'); assert.equal(m.bind.create_host_path, false);
+    return [m.source, m.target, m.read_only];
+  });
+  assert.deepEqual(mounts('nginx'), [
+    ['/volume1/docker/portal/nginx/nginx.conf', '/etc/nginx/nginx.conf', true],
+    ['/volume1/docker/portal/files', '/srv/portal-files', true],
+    ['/volume1/docker/portal/logs', '/var/log/nginx', false],
+  ]);
+  assert.deepEqual(mounts('couchdb'), [
+    ['/volume1/docker/portal/couchdb/data', '/opt/couchdb/data', false],
+    ['/volume1/docker/portal/couchdb/config', '/opt/couchdb/etc/local.d', false],
+  ]);
+  for (const key of ['COUCHDB_USER', 'COUCHDB_PASSWORD']) assert.match(config.services.couchdb.environment[key], /:\?/);
+  const original = readFileSync(join(root, 'deploy/ds920/nginx.original-placeholder.conf'), 'utf8');
+  assert.match(original, /worker_connections 1024;/);
+  assert.match(original, /return 200 'portal nginx is running';/);
+  assert.doesNotMatch(original, /proxy_pass|\b(alias|root)\s/);
 });
