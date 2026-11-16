@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { randomUUID, createHash } from 'node:crypto';
-import { mkdtemp, mkdir, writeFile, readFile, chmod, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, chmod } from 'node:fs/promises';
 import { request } from 'node:https';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -16,14 +16,14 @@ const exec = promisify(execFile), yaml = require('js-yaml'), nano = require('nan
 describe('DS920 additive deployment with existing bind-backed infrastructure', { concurrency: false, timeout: 240000 }, () => {
   const project = `portal-7h-${randomUUID()}`, network = `${project}-existing`, storageId = randomUUID();
   const password = 'DisposableDeploymentPassword123';
-  let directory: string, base: string, envFile: string, diagnosticFile: string, proxyPort: number, client: any;
+  let directory: string, base: string, envFile: string, proxyPort: number, client: any;
   let attempted = false, networkCreated = false, fileId: string, originalIds: string[], beforeUser: any;
   const bytes = Buffer.from('disposable private deployment fixture');
   const overlay = resolve('deploy/ds920/compose.app.yml');
 
   function compose(args: string[], merged = true, extra: Record<string, string> = {}) {
     return exec('docker', ['compose', '-p', project, '--env-file', envFile, '-f', base,
-      ...(merged ? ['-f', overlay, '-f', diagnosticFile] : []), ...args], {
+      ...(merged ? ['-f', overlay] : []), ...args], {
       env: { ...process.env, ...extra }, timeout: 90000, maxBuffer: 1024 * 1024,
     });
   }
@@ -71,14 +71,6 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
     client = nano({ url: `http://127.0.0.1:${port}`, requestDefaults: { auth: { username: 'ci-admin', password } } });
     await eventually(async () => assert.equal((await client.session()).userCtx.name, 'ci-admin'), 'existing database readiness');
   }
-  async function ledgerDiagnostic() {
-    // Read-only diagnosis of synthetic fixtures; never print docs, environment or credentials.
-    const script = `require('reflect-metadata'); const {CouchDbService}=require('./dist/common/couchdb.service'); const {UsersService}=require('./dist/users/users.service'); const {ManagedStorage}=require('./dist/files/managed-storage.service'); (async()=>{const db=new CouchDbService();await db.initialize();const storage=new ManagedStorage(db,new UsersService(db));storage.root=process.env.PORTAL_UPLOADS_DIR;try{await storage.ledger();console.log('Read-only ledger diagnostic: consistent')}catch(e){console.log('Read-only ledger diagnostic: '+e.stack.split('\\n').slice(0,5).join(' | '))}})().catch(()=>{console.log('Read-only diagnostic dependency failed');process.exitCode=1});`;
-    const result = await compose(['exec', '-T', 'app', 'node', '-e', script]);
-    console.log(result.stdout.trim());
-    const logs = await compose(['logs', '--no-color', 'app']);
-    console.log(logs.stdout.split('\n').filter(line => line.includes('7H-TRACE')).join('\n'));
-  }
   async function ready() { await eventually(async () => assert.equal((await http('/healthz')).status, 200), 'TLS proxy and app readiness'); }
 
   before(async () => {
@@ -95,10 +87,7 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
     await exec('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-subj', '/CN=localhost',
       '-keyout', join(directory, 'tls/tls.key'), '-out', join(directory, 'tls/tls.crt')]);
     base = join(directory, 'existing.yml'); envFile = join(directory, 'protected.env');
-    diagnosticFile = join(directory, 'diagnostic.yml');
     const bind = (source: string, target: string, read_only = false) => ({ type: 'bind', source, target, read_only, bind: { create_host_path: false } });
-    await writeFile(join(directory, 'trace.cjs'), `const streams=require('node:stream/promises');const pipeline=streams.pipeline;streams.pipeline=async(...args)=>{try{return await pipeline(...args)}catch(e){console.log('7H-TRACE pipeline '+e.code);throw e}};const proto=require('/app/dist/files/managed-storage.service').ManagedStorage.prototype;const invalidate=proto.invalidate;proto.invalidate=function(){console.log('7H-TRACE invalidation '+new Error().stack.split('\\n').slice(1,4).join(' | '));return invalidate.call(this)};`);
-    await writeFile(diagnosticFile, yaml.dump({services:{app:{environment:{NODE_OPTIONS:'--require /tmp/7h-trace.cjs'},volumes:[bind(join(directory,'trace.cjs'),'/tmp/7h-trace.cjs',true)]}}}));
     // Production candidate inherits the original services; only this CI model
     // supplies their definitions and temporary loopback diagnostics ports.
     await writeFile(base, yaml.dump({ services: {
@@ -161,6 +150,9 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
     proxyPort = Number((await compose(['port', 'nginx', '443'])).stdout.trim().split(':').pop());
     await ready();
     await compose(['exec', '-T', 'nginx', 'nginx', '-t']);
+    const version = (await compose(['exec', '-T', 'nginx', 'nginx', '-v'])).stderr.trim();
+    assert.match(version, /^nginx version: nginx\/\d+\.\d+\.\d+$/);
+    console.log(`Disposable proxy ${version}`);
   });
   it('routes TLS login/session/CSRF and rejects unauthenticated downloads and spoofed forwarding', async () => {
     const page = await http('/login', { headers: { 'X-Forwarded-Proto': 'http', 'X-Forwarded-For': '198.51.100.1' } });
@@ -189,7 +181,6 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
     assert.equal(file.sha256, createHash('sha256').update(bytes).digest('hex'));
     assert.deepEqual(file.sharedWithUserIds, []);
     const excess = await json(a, '/uploads/intents', { originalFilename: 'too-large.txt', title: 'excess', description: '', sizeBytes: '1000000000', idempotencyKey: randomUUID() });
-    if (excess.status !== 409) await ledgerDiagnostic();
     assert.equal(excess.status, 409, excess.body);
   });
   it('does not expose private metadata or permit direct Nginx NAS-file access', async () => {
