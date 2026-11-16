@@ -16,14 +16,14 @@ const exec = promisify(execFile), yaml = require('js-yaml'), nano = require('nan
 describe('DS920 additive deployment with existing bind-backed infrastructure', { concurrency: false, timeout: 240000 }, () => {
   const project = `portal-7h-${randomUUID()}`, network = `${project}-existing`, storageId = randomUUID();
   const password = 'DisposableDeploymentPassword123';
-  let directory: string, base: string, envFile: string, proxyPort: number, client: any;
+  let directory: string, base: string, envFile: string, diagnosticFile: string, proxyPort: number, client: any;
   let attempted = false, networkCreated = false, fileId: string, originalIds: string[], beforeUser: any;
   const bytes = Buffer.from('disposable private deployment fixture');
   const overlay = resolve('deploy/ds920/compose.app.yml');
 
   function compose(args: string[], merged = true, extra: Record<string, string> = {}) {
     return exec('docker', ['compose', '-p', project, '--env-file', envFile, '-f', base,
-      ...(merged ? ['-f', overlay] : []), ...args], {
+      ...(merged ? ['-f', overlay, '-f', diagnosticFile] : []), ...args], {
       env: { ...process.env, ...extra }, timeout: 90000, maxBuffer: 1024 * 1024,
     });
   }
@@ -76,6 +76,8 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
     const script = `require('reflect-metadata'); const {CouchDbService}=require('./dist/common/couchdb.service'); const {UsersService}=require('./dist/users/users.service'); const {ManagedStorage}=require('./dist/files/managed-storage.service'); (async()=>{const db=new CouchDbService();await db.initialize();const storage=new ManagedStorage(db,new UsersService(db));storage.root=process.env.PORTAL_UPLOADS_DIR;try{await storage.ledger();console.log('Read-only ledger diagnostic: consistent')}catch(e){console.log('Read-only ledger diagnostic: '+e.stack.split('\\n').slice(0,5).join(' | '))}})().catch(()=>{console.log('Read-only diagnostic dependency failed');process.exitCode=1});`;
     const result = await compose(['exec', '-T', 'app', 'node', '-e', script]);
     console.log(result.stdout.trim());
+    const logs = await compose(['logs', '--no-color', 'app']);
+    console.log(logs.stdout.split('\n').filter(line => line.includes('7H-TRACE')).join('\n'));
   }
   async function ready() { await eventually(async () => assert.equal((await http('/healthz')).status, 200), 'TLS proxy and app readiness'); }
 
@@ -93,7 +95,10 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
     await exec('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-subj', '/CN=localhost',
       '-keyout', join(directory, 'tls/tls.key'), '-out', join(directory, 'tls/tls.crt')]);
     base = join(directory, 'existing.yml'); envFile = join(directory, 'protected.env');
+    diagnosticFile = join(directory, 'diagnostic.yml');
     const bind = (source: string, target: string, read_only = false) => ({ type: 'bind', source, target, read_only, bind: { create_host_path: false } });
+    await writeFile(join(directory, 'trace.cjs'), `const streams=require('node:stream/promises');const pipeline=streams.pipeline;streams.pipeline=async(...args)=>{try{return await pipeline(...args)}catch(e){console.log('7H-TRACE pipeline '+e.code);throw e}};const proto=require('/app/dist/files/managed-storage.service').ManagedStorage.prototype;const invalidate=proto.invalidate;proto.invalidate=function(){console.log('7H-TRACE invalidation '+new Error().stack.split('\\n').slice(1,4).join(' | '));return invalidate.call(this)};`);
+    await writeFile(diagnosticFile, yaml.dump({services:{app:{environment:{NODE_OPTIONS:'--require /tmp/7h-trace.cjs'},volumes:[bind(join(directory,'trace.cjs'),'/tmp/7h-trace.cjs',true)]}}}));
     // Production candidate inherits the original services; only this CI model
     // supplies their definitions and temporary loopback diagnostics ports.
     await writeFile(base, yaml.dump({ services: {
