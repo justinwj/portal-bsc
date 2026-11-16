@@ -2,6 +2,8 @@
 
 **Updated after the supplied original configuration:** see the [reconciliation review](ds920-existing-configuration-review.md) and follow-up below. The initial missing-YAML/external-network/TLS-only assumptions in the historical evidence are superseded. Current preparation preserves `8088:80`, inherits the original default network and leaves HTTPS/DSM trust undecided. No NAS was accessed.
 
+**Latest owner inspection:** Justin has confirmed that DSM's Reverse Proxy list on `jwj_NAS_1` is empty. No Portal hostname, HTTPS source/destination, certificate assignment or trusted proxy address is configured. DSM HTTPS termination to the existing HTTP backend on 8088 is the owner-preferred option to evaluate. HTTPS, enforceable backend restrictions, observed trusted-source/header behavior and certificate management remain outstanding; no rule or trust behavior has been implemented.
+
 Preparation/testing only. No connection to `jwj_NAS_1`, DS920+, DS925+, their file shares, databases or management interfaces. No image transfer, deployment, container replacement on a NAS, image publication, credential rotation, merge or backup-task configuration occurred. Session 7H-B remains separately gated.
 
 ## Starting state and baseline
@@ -101,3 +103,7 @@ Final reconciled configuration/test SHA: `9b2ff729fc4cb7a4c735a7b3878b17e938a44f
 The documentation publication descendant records the reconciled files and adds only an explicit unselected-alternative comment to the TLS candidate; its exact SHA is supplied in the handoff. NAS-side deployment acceptance remains pending independently of CI. The rollback procedure is prepared for review, not executed on either NAS. No managed root, DSM rule, certificate, image transfer or authentication configuration was provisioned.
 
 Follow-up files: `README.md`, `deploy/ds920/.env.example`, `deploy/ds920/compose.app.yml`, `deploy/ds920/compose.infrastructure.yml`, `deploy/ds920/nginx.conf`, `deploy/ds920/nginx.http-proposal.conf`, `deploy/ds920/nginx.original-placeholder.conf`, `docs/ds920-existing-configuration-review.md`, `docs/ds920-production-preparation.md`, this report, `test/persistence/ds920.test.ts`, `test/tooling/ds920-deployment.test.cjs`. No dependency/package-lock changes or production credentials are included. Staged `.idea` files and unrelated options report remain preserved.
+
+## Owner-confirmed empty DSM reverse-proxy list
+
+After reconciliation, Justin reported a direct DSM inspection confirming the empty list and absence of Portal-specific hostname/rule/certificate/trust configuration. This supersedes the historical unverified-status statements above; it does not claim a Codex NAS inspection. Documentation now records the preferred DSM HTTPS → protected 8088 HTTP → existing Nginx → app topology for evaluation, including firewall/loopback alternatives, the separate approval required for any container-recreating rebind, effective remote-denial tests, observed exact proxy sources, spoofed-header rejection, certificate/renewal decisions and future TDD acceptance. The executable Compose, header rules and application behavior remain unchanged; only a comment in the HTTP candidate is updated. No artificial RED test is introduced for this documentation-only update. No DSM rule, certificate, DNS record, firewall or NAS setting was created or modified.

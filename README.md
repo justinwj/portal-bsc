@@ -61,7 +61,7 @@ The development runner launches only complete, error-free builds, stops on compi
 
 ## Production deployment notes
 - Expect Redis and CouchDB to be internal services, not published publicly.
-- Keep Nginx in front of the app. For DS920+, preserve the existing `portal-nginx` HTTP mapping `8088:80`; HTTPS termination and DSM trusted-proxy configuration remain deployment-review decisions.
+- Keep Nginx in front of the app. For DS920+, preserve `portal-nginx` and `8088:80`. The owner confirmed DSM's Reverse Proxy list is empty; DSM HTTPS termination to this protected backend is the preferred option to evaluate. HTTPS, backend restrictions and explicit proxy trust remain outstanding deployment requirements.
 - Set runtime secrets through protected environment variables or a deployment secret manager. `ADMIN_*` values are required only for explicit administrator bootstrap and should be removed from the runtime environment after verified initialization.
 - Production requires an existing, readable/searchable NAS directory; the app does not create a replacement and needs no NAS write access. Set `NAS_FILES_HOST_PATH` explicitly for the read-only Compose bind to `/var/lib/portal-bsc/files`; missing bind sources must fail.
 - The current production proposal targets **jwj_NAS_1 (DS920+)**. Follow [DS920+ preparation, backup, rollback and acceptance](docs/ds920-production-preparation.md); preserve its existing `portal` project and populated CouchDB bind mounts. Preparation is not deployment approval. DS925+ is the proposed backup destination/future standby; its [older readiness guide](docs/ds925-production-readiness.md) is historical deployment guidance.
