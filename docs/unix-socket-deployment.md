@@ -18,6 +18,8 @@ authorized tailnet client -> HTTPS :443 / existing ts.net certificate
 
 Initially use **placeholder mode** with the existing three services. App mode is for a separately approved later fourth-container deployment. No Nginx host port or Nginx TCP listener remains in either mode. The canonical URL is configuration, not application code.
 
+For later application readiness, require `/healthz` to return the application's JSON object with `status: "ok"` and a valid timestamp. HTTP 200 alone can come from the placeholder during a reload and does not establish that NestJS is ready or that login sessions work.
+
 Version-specific evidence:
 
 - [Tailscale 1.104.7 Serve CLI](https://github.com/tailscale/tailscale/blob/v1.104.7/cmd/tailscale/cli/serve_v2.go) accepts HTTP proxy targets `unix:/absolute/path`. [The backend implementation](https://github.com/tailscale/tailscale/blob/v1.104.7/ipn/ipnlocal/serve.go) rewrites a Unix backend's Host to `localhost` and supplies the original forwarded host, HTTPS scheme and client IP. This is HTTP Serve, not TCP forwarding or PROXY protocol.
