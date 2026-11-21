@@ -167,7 +167,6 @@ jobs:
           export DOCKER_CONFIG="$config" DOCKER_HOST="$endpoint"
           docker compose version
           test "$(docker compose version --short)" = 2.20.1
-          COUCHDB_USER=ci-only COUCHDB_PASSWORD=ci-only PORTAL_NGINX_SOCKET_IMAGE=portal-nginx-socket:ci \
-            PORTAL_SOCKET_GID=0 PORTAL_SOCKET_HOST_PATH=/not-created/portal-socket \
-            docker compose -p portal -f deploy/ds920/compose.unix.yml config --format json > "$RUNNER_TEMP/portal-unix-compose.json"
-          node -e 'const c=require(process.env.RUNNER_TEMP+"/portal-unix-compose.json");require("node:assert/strict").equal(c.services.nginx.ports,undefined);require("node:assert/strict").deepEqual(Object.keys(c.networks),["default"]);console.log("Compose 2.20.1: no Nginx ports; original implicit default network")'
+          # Normalize the full Unix base AND app overlay; detect every published
+          # port, including ports inherited through an accidental unsafe merge.
+          node --test --test-reporter=tap --require ts-node/register test/persistence/compose-isolation.test.ts

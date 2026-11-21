@@ -1,6 +1,6 @@
-# REVIEW REFERENCE reconciled with Justin's supplied original portal project.
-# Do not apply this to recreate existing services. For a later app-only addition,
-# use the protected ORIGINAL project file plus compose.app.yml, with -p portal.
+# HISTORICAL REFERENCE: original project BEFORE the owner's 2026-11-20 DB-port removal.
+# Unsafe for production or rollback; NEVER combine this file with compose.app.yml.
+# Use only the approved complete compose.unix.yml plus the app overlay.
 # Differences from the original: protected required credentials and long binds
 # that reject missing sources. Existing paths, identities, ports and commands stay.
 services:

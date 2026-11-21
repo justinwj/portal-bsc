@@ -48,8 +48,11 @@ test('complete Unix Compose removes publishing without unsupported reset tags an
   assert.equal(config.services.nginx.network_mode,undefined);
   assert.equal(config.networks,undefined);
   assert.equal(config.volumes,undefined);
-  assert.deepEqual(config.services.couchdb,original.services.couchdb);
-  assert.deepEqual(config.services.redis,original.services.redis);
+  for(const name of ['couchdb','redis']){
+    const expected={...original.services[name]};delete expected.ports;
+    assert.equal(config.services[name].ports,undefined);
+    assert.deepEqual(config.services[name],expected);
+  }
   assert.equal(config.services.nginx.container_name,'portal-nginx');
   assert.deepEqual(config.services.nginx.volumes.slice(0,original.services.nginx.volumes.length),original.services.nginx.volumes);
   const socket=config.services.nginx.volumes[original.services.nginx.volumes.length];

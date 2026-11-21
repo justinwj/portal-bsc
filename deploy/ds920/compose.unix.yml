@@ -1,4 +1,6 @@
-# Complete replacement candidate; never merge with a TCP-publishing file. Preparation only.
+# Complete approved Unix base: no service publishes a host port.
+# Only compose.app.yml may be added; never merge a historical TCP-publishing base.
+# Preparation only. Preserve the existing portal project/default network and binds.
 services:
   nginx:
     image: ${PORTAL_NGINX_SOCKET_IMAGE:?Supply the verified immutable socket image}
@@ -62,8 +64,6 @@ services:
         read_only: false
         bind:
           create_host_path: false
-    ports:
-      - 127.0.0.1:5984:5984
   redis:
     image: redis:7-alpine
     container_name: portal-redis
@@ -74,5 +74,3 @@ services:
       - ''
       - '--appendonly'
       - 'no'
-    ports:
-      - 127.0.0.1:6379:6379

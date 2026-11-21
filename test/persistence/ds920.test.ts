@@ -173,7 +173,9 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
     assert.equal(merged.services.couchdb.volumes.find((m: any) => m.target === '/opt/couchdb/data').source, join(directory, 'data'));
     for (const name of ['nginx', 'couchdb', 'redis', 'app']) assert.deepEqual(Object.keys(merged.services[name].networks), ['default']);
   });
-  it('reconciles the supplied NAS paths, identities and loopback bindings without executing a NAS stack', async () => {
+  it('characterizes the rejected historical TCP base and overlay without executing a NAS stack', async () => {
+    // Retained historical assertions document why this combination is unsafe.
+    // Only compose.unix.yml plus compose.app.yml is approved for production.
     const result = await exec('docker', ['compose', '-p', 'portal', '--env-file', envFile,
       '-f', resolve('deploy/ds920/compose.infrastructure.yml'), '-f', overlay, 'config', '--format', 'json'],
       { timeout: 15000, maxBuffer: 1024 * 1024 });
@@ -499,5 +501,60 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
     await compose(['exec','-T','redis','redis-cli','ping']);
     const container=JSON.parse((await exec('docker',['inspect',(await compose(['ps','-q','nginx'])).stdout.trim()])).stdout)[0];
     assert.deepEqual(container.HostConfig.PortBindings,{});
+  });
+  it('keeps all four services unpublished while the production app authenticates to CouchDB and persists Redis sessions internally',async()=>{
+    const dependencyIds=await ids(),nginxId=(await compose(['ps','-q','nginx'])).stdout.trim();
+    const current=yaml.load(await readFile(base,'utf8'));
+    // Remove the disposable fixture's diagnostic port, just as the owner already
+    // did on the NAS. This touches only our positively identified CI project.
+    delete current.services.couchdb.ports;
+    await writeFile(base,yaml.dump(current));
+    const config=JSON.parse((await compose(['config','--format','json'])).stdout);
+    for(const name of ['nginx','couchdb','redis','app']){
+      assert.equal(config.services[name].ports,undefined,`${name} normalized publication`);
+      assert.deepEqual(Object.keys(config.services[name].networks),['default']);
+    }
+    await compose(['up','-d','--no-deps','--force-recreate','couchdb']);
+    await eventually(async()=>{
+      const result=await compose(['exec','-T','couchdb','curl','--fail','--silent','http://127.0.0.1:5984/_up']);
+      assert.equal(JSON.parse(result.stdout).status,'ok');
+    },'unpublished CouchDB readiness');
+    assert.equal((await compose(['exec','-T','redis','redis-cli','ping'])).stdout.trim(),'PONG');
+    await compose(['up','-d','--no-deps','app']);
+    await writeFile(activeProxyConfig,require('../../scripts/render-unix-proxy.cjs').renderUnixProxy({PORTAL_PUBLIC_ORIGIN:`https://${serveHost}`,PORTAL_PROXY_RESPONSE_MODE:'app'}));
+    await compose(['exec','-T','nginx','nginx','-s','reload']);
+    await eventually(async()=>assert.equal((await served('/healthz')).status,200),'unpublished dependency application startup');
+    const actor=await serveLogin();
+    assert.equal((await served('/files',{cookie:actor.cookie})).status,200,'Redis-backed session survives another request');
+    assert.deepEqual((await served(`/download/${fileId}`,{cookie:actor.cookie})).bytes,bytes);
+    const probe=await compose(['exec','-T','app','node','-e',
+      `const assert=require('node:assert/strict');(async()=>{
+        const db=require('nano')({url:process.env.COUCHDB_URL,requestDefaults:{auth:{username:process.env.COUCHDB_USER,password:process.env.COUCHDB_PASSWORD}}});
+        assert.equal((await db.session()).userCtx.name,'ci-admin');
+        assert.equal((await db.use('portal_users').get('existing-admin'))._id,'existing-admin');
+        assert.equal((await db.use('portal_audit').get('existing-history')).event,'test.preexisting');
+        const redis=require('redis').createClient({url:process.env.REDIS_URL,socket:{connectTimeout:5000,reconnectStrategy:false}});
+        redis.on('error',()=>{});await redis.connect();assert.equal(await redis.ping(),'PONG');
+        await redis.set('ci:unpublished-connectivity','ok',{EX:60});assert.equal(await redis.get('ci:unpublished-connectivity'),'ok');
+        await redis.quit();console.log('Internal CouchDB authenticated read and Redis PING/SET/GET succeeded');
+      })().catch(()=>{console.error('Internal dependency verification failed');process.exitCode=1;});`]);
+    assert.match(probe.stdout,/Internal CouchDB authenticated read and Redis PING\/SET\/GET succeeded/);
+    for(const name of ['nginx','couchdb','redis','app']){
+      const info=JSON.parse((await exec('docker',['inspect',(await compose(['ps','-q',name])).stdout.trim()])).stdout)[0];
+      assert.deepEqual(info.HostConfig.PortBindings,{},`${name} actual publication`);
+    }
+    assert.equal((await ids())[1],dependencyIds[1],'Redis not recreated');
+    assert.equal((await compose(['ps','-q','nginx'])).stdout.trim(),nginxId,'Nginx not recreated');
+    const isolatedIds=await ids();
+    await writeFile(activeProxyConfig,require('../../scripts/render-unix-proxy.cjs').renderUnixProxy({PORTAL_PUBLIC_ORIGIN:`https://${serveHost}`,PORTAL_PROXY_RESPONSE_MODE:'placeholder'}));
+    await compose(['exec','-T','nginx','nginx','-s','reload']);await compose(['stop','app']);
+    await eventually(async()=>assert.equal((await served('/')).body,'portal nginx is running'),'all-unpublished secure rollback');
+    assert.deepEqual(await ids(),isolatedIds,'Rollback preserves isolated databases');
+    for(const name of ['nginx','couchdb','redis','app']){
+      const id=(await compose(['ps','-a','-q',name])).stdout.trim();
+      const info=JSON.parse((await exec('docker',['inspect',id])).stdout)[0];
+      assert.deepEqual(info.HostConfig.PortBindings,{},`${name} rollback publication`);
+    }
+    console.log('All four services unpublished; internal dependency access and Unix-placeholder rollback succeeded');
   });
 });
