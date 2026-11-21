@@ -523,7 +523,14 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
     await compose(['up','-d','--no-deps','app']);
     await writeFile(activeProxyConfig,require('../../scripts/render-unix-proxy.cjs').renderUnixProxy({PORTAL_PUBLIC_ORIGIN:`https://${serveHost}`,PORTAL_PROXY_RESPONSE_MODE:'app'}));
     await compose(['exec','-T','nginx','nginx','-s','reload']);
-    await eventually(async()=>assert.equal((await served('/healthz')).status,200),'unpublished dependency application startup');
+    await eventually(async()=>{
+      const health=await served('/healthz');
+      assert.equal(health.status,200);
+      assert.match(health.headers['content-type'],/^application\/json\b/);
+      const payload=JSON.parse(health.body);
+      assert.equal(payload.status,'ok');
+      assert.ok(Number.isFinite(Date.parse(payload.timestamp)));
+    },'unpublished dependency application JSON readiness (not the HTTP-200 placeholder)');
     const actor=await serveLogin();
     assert.equal((await served('/files',{cookie:actor.cookie})).status,200,'Redis-backed session survives another request');
     assert.deepEqual((await served(`/download/${fileId}`,{cookie:actor.cookie})).bytes,bytes);
