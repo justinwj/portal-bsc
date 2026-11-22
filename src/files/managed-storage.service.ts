@@ -462,7 +462,8 @@ export class ManagedStorage implements OnModuleDestroy {
       doc.shareVersions = versions;
       doc.shareOwnerVersion = actor.sessionVersion ?? 0;
       doc.updatedAt = new Date().toISOString();
-      this.event(doc, visibility && previousVisibility !== mode ? 'file.visibility_changed' : (recipientIds.length ? 'file.shared' : 'file.sharing_revoked'), actor, req, { previous, next: recipientIds, previousVisibility, visibility: mode });
+      const visibilityEvent = visibility && (previousVisibility !== mode || mode !== 'selected-members');
+      this.event(doc, visibilityEvent ? 'file.visibility_changed' : (recipientIds.length ? 'file.shared' : 'file.sharing_revoked'), actor, req, { previous, next: recipientIds, previousVisibility, visibility: mode });
       const saved = await this.save('portal_files', doc);
       try {
         await this.deliver(saved);

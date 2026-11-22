@@ -220,6 +220,8 @@ describe('managed upload admission and streaming HTTP',{concurrency:false},()=>{
     store.users.get('owner').isActive=true;store.users.get('owner').sessionVersion++;
     assert.equal((await member.client.request(`/download/${id}`)).status,404);
     const renewed=await actor();assert.equal((await renewed.client.request(`/files/${id}/sharing`,{visibility:'all-members'},'POST',renewed.csrf)).status,303);
+    const renewal=[...store.docs.values()].filter((event:any)=>event.type==='audit'&&event.details?.fileId===id).at(-1);
+    assert.equal(renewal.event,'file.visibility_changed','Renewing all-member access must not be logged as revocation');
     assert.equal((await member.client.request(`/download/${id}`)).status,200);
     store.users.get('member').isActive=false;assert.equal((await member.client.request(`/download/${id}`)).status,401);
   });
