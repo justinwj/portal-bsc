@@ -1,7 +1,7 @@
 import { Body, Controller, Get, HttpException, Param, Post, Req, Res, UseGuards } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { PortalSettingsDto, UserQuotaDto } from '../common/dto/common.dto';
-import { AuthGuard } from '../common/guards/auth.guard';
+import { AuthGuard, BrowserPage } from '../common/guards/auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { UsersService } from './users.service';
 
@@ -9,6 +9,7 @@ import { UsersService } from './users.service';
 @UseGuards(AuthGuard, AdminGuard)
 export class QuotaController {
   constructor(private readonly users: UsersService) {}
+  @BrowserPage()
   @Get()
   async page(@Req() req: Request & {session?:any}, @Res() res: Response) {
     try { return res.render('admin-settings', { title: 'Capacity and storage policy', user: req.session.user,

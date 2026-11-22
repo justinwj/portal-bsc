@@ -25,8 +25,8 @@ describe('persistent managed uploads using real CouchDB and Redis',{concurrency:
   function overrides(){return{PORTAL_UPLOADS_ENABLED:'true',PORTAL_UPLOADS_DIR:root,PORTAL_UPLOADS_HOST_PATH:root,PORTAL_UPLOADS_STORAGE_ID:storageId,PORTAL_UPLOAD_MIN_FREE_BYTES:'1048576'};}
   async function start(couchUrl?:string){app=await launchApplication(dependencyUrl('REDIS_URL'),{...overrides(),...(couchUrl?{COUCHDB_URL:couchUrl}:{})});await within(app.ready,15000,'Managed production application readiness');}
   async function actor(username=name){const client=browser(app.url),csrf=formToken((await client.request('/login')).body);assert.equal((await client.request('/login',{username,password,_csrf:csrf})).headers.get('location'),'/');return{client,csrf:formToken((await client.request('/')).body)};}
-  async function intent(a:Awaited<ReturnType<typeof actor>>,size:number,filename='file.txt',key=randomUUID()){
-    const r=await fetch(app.url+'/uploads/intents',{method:'POST',headers:{cookie:a.client.cookie,'x-forwarded-proto':'https','x-csrf-token':a.csrf,'content-type':'application/json'},body:JSON.stringify({originalFilename:filename,title:'Managed real-service title',description:'private managed content',sizeBytes:String(size),idempotencyKey:key})});const body=await r.json() as any;if(body.id)ids.add(body.id);return{status:r.status,...body};
+  async function intent(a:Awaited<ReturnType<typeof actor>>,size:number,filename='file.txt',key=randomUUID(),visibility:string|null='private'){
+    const r=await fetch(app.url+'/uploads/intents',{method:'POST',headers:{cookie:a.client.cookie,'x-forwarded-proto':'https','x-csrf-token':a.csrf,'content-type':'application/json'},body:JSON.stringify({...(visibility===null?{}:{visibility}),originalFilename:filename,title:'Managed real-service title',description:'private managed content',sizeBytes:String(size),idempotencyKey:key})});const body=await r.json() as any;if(body.id)ids.add(body.id);return{status:r.status,...body};
   }
   async function content(a:Awaited<ReturnType<typeof actor>>,id:string,data:Buffer){const r=await fetch(app.url+`/uploads/${id}/content`,{method:'PUT',headers:{cookie:a.client.cookie,'x-forwarded-proto':'https','x-csrf-token':a.csrf,'content-type':'application/octet-stream'},body:new Uint8Array(data)});return{status:r.status,body:await r.text()};}
   async function upload(a:Awaited<ReturnType<typeof actor>>,data:Buffer=Buffer.from('abc'),filename='file.txt'){const reserved=await intent(a,data.length,filename);assert.equal(reserved.status,201);const done=await content(a,reserved.id,data);assert.equal(done.status,200,done.body);return reserved.id;}
@@ -48,6 +48,48 @@ describe('persistent managed uploads using real CouchDB and Redis',{concurrency:
       for(const [id,original]of originalFixed){const current=await doc('portal_users',id);if(original)await db.use('portal_users').insert({...original,_rev:current?._rev});else if(current)await db.use('portal_users').destroy(id,current._rev);}
       if(originalPolicy)await replacePolicy(originalPolicy);else{const current=await doc('portal_users','portal-settings');if(current)await db.use('portal_users').destroy(current._id,current._rev);}}
     if(directory)await rm(directory,{recursive:true,force:true});
+  });
+  it('7I persists confirmation, quotas and visible checked state across production app restart and new Redis sessions',async()=>{
+    const policy=await doc('portal_users','managed-upload-policy'),quotas=await doc('portal_users','portal-settings');
+    for(let i=0;i<2;i++){
+      const a=await actor(),page=await a.client.request('/admin/settings/uploads');assert.match(page.body,/name="confirm"[^>]*\bchecked\b/);assert.match(page.body,/Upload policy: Confirmed/);
+      if(i===0){await app.close();await start();}
+    }
+    assert.deepEqual(await doc('portal_users','managed-upload-policy'),policy);assert.deepEqual(await doc('portal_users','portal-settings'),quotas);
+  });
+  it('7I browser redirects while APIs remain JSON and revoked real Redis sessions stay invalid',async()=>{
+    const response=await fetch(app.url+'/',{headers:{Accept:'text/html','x-forwarded-proto':'https'},redirect:'manual'});assert.equal(response.status,302);assert.equal(response.headers.get('location'),'/login');
+    const api=await fetch(app.url+'/',{headers:{Accept:'application/json'},redirect:'manual'});assert.equal(api.status,401);assert.match(api.headers.get('content-type')!,/application\/json/);
+    const a=await actor(name+'-member'),users=new UsersService(couch);await users.setUserActive(member._id,false,owner._id,{ip:'127.0.0.1'});
+    try{const blocked=await fetch(app.url+'/',{headers:{cookie:a.client.cookie,Accept:'text/html','x-forwarded-proto':'https'},redirect:'manual'});assert.equal(blocked.status,302);
+      await users.setUserActive(member._id,true,owner._id,{ip:'127.0.0.1'});assert.equal((await a.client.request('/files')).status,401);
+    }finally{if(!(await couch.findUserById(member._id))!.isActive)await users.setUserActive(member._id,true,owner._id,{ip:'127.0.0.1'});}
+  });
+  it('7I all-member policy automatically admits a newly approved account and survives restart without recipient fanout',async()=>{
+    const a=await actor(),reservation=await intent(a,3,'collaboration.txt',randomUUID(),null);assert.equal(reservation.status,201);assert.equal((await content(a,reservation.id,Buffer.from('abc'))).status,200);
+    const file=await doc('portal_files',reservation.id);assert.equal(file.visibility,'all-members');assert.equal(file.accessModel,'owner-acl-v2');assert.deepEqual(file.sharedWithUserIds,[]);
+    const users=new UsersService(couch),username=name+'-new';await users.register({username,email:username+'@example.test',password},{ip:'127.0.0.1'});
+    const pending=await couch.findUserByUsername(username);assert.ok(pending);
+    assert.equal((await a.client.request(`/admin/users/${pending._id}/registration/approve`,{_csrf:a.csrf})).status,303);
+    for(const username of [name+'-member',name+'-new']){const reader=await actor(username);assert.match((await reader.client.request('/files')).body,/All members/);assert.equal((await reader.client.request(`/download/${reservation.id}`)).body,'abc');}
+    await app.close();await start();const reader=await actor(name+'-new');assert.equal((await reader.client.request(`/download/${reservation.id}`)).body,'abc');assert.deepEqual(await doc('portal_files',reservation.id),file);
+  });
+  it('7I legacy private and selective records retain exact CouchDB revisions, hashes, journals and access across startup',async()=>{
+    const a=await actor(),privateId=await upload(a),selectedId=await upload(a);await a.client.request(`/files/${selectedId}/sharing`,{recipientIds:member._id,_csrf:a.csrf});
+    for(const id of [privateId,selectedId]){const f=await doc('portal_files',id);f.upload.fingerprint=createHash('sha256').update(JSON.stringify([f.originalFilename,f.title,f.description,String(f.sizeBytes)])).digest('hex');if(id===privateId){delete f.shareOwnerVersion;delete f.shareVersions;}await db.use('portal_files').insert({...f,accessModel:'owner-acl-v1',visibility:'private'});}
+    const snapshots=await Promise.all([privateId,selectedId].map(id=>doc('portal_files',id)));
+    await app.close();await start();const reader=await actor(name+'-member');
+    assert.equal((await reader.client.request(`/download/${privateId}`)).status,404);assert.equal((await reader.client.request(`/download/${selectedId}`)).body,'abc');
+    assert.deepEqual(await Promise.all([privateId,selectedId].map(id=>doc('portal_files',id))),snapshots);
+  });
+  it('7I persists visibility transitions and audit records without copying managed bytes or quota charges',async()=>{
+    const a=await actor(),id=await upload(a),snapshot=await doc('portal_files',id),reader=await actor(name+'-member');
+    for(const visibility of ['all-members','private','selected-members']){
+      const saved=await a.client.request(`/files/${id}/sharing`,{visibility,recipientIds:member._id,_csrf:a.csrf});assert.equal(saved.status,303);
+      assert.equal((await reader.client.request(`/download/${id}`)).status,visibility==='private'?404:200);
+    }
+    const events=(await db.use('portal_audit').list({include_docs:true})).rows.map((r:any)=>r.doc).filter((e:any)=>e.event==='file.visibility_changed'&&e.details.fileId===id);assert.equal(events.length,3);
+    const file=await doc('portal_files',id);for(const key of ['storedFilename','sizeBytes','sha256','storageId','uploadedByUserId'])assert.equal(file[key],snapshot[key]);
   });
   it('persists real bytes, exact quotas and upload audit with readback from a fresh app',async()=>{
     const a=await actor(),id=await upload(a),file=await doc('portal_files',id);assert.equal(file.upload.state,'committed');assert.equal(file.scanResult,'not-scanned');assert.equal(file.sha256,createHash('sha256').update('abc').digest('hex'));assert.equal(await readFile(join(root,'objects',file.storedFilename),'utf8'),'abc');

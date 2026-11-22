@@ -12,6 +12,7 @@ import { UsersService } from '../users/users.service';
 import { SessionUser } from '../common/roles';
 import { UploadIntentDto, UploadPolicyDto } from './upload.dto';
 import { uploadExtension, uploadExtensions, validateUploadContent } from './upload-types';
+import { managedVisibility, ManagedVisibility } from '../common/file-visibility';
 const POLICY = 'managed-upload-policy', STORAGE = 'managed-storage-registration';
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const idPattern = /^upload-[a-f0-9]{64}$/;
@@ -22,7 +23,7 @@ export interface ManagedFile {
   schemaVersion: 2;
   storageScope: 'portal-managed';
   storageId: string;
-  accessModel: 'owner-acl-v1';
+  accessModel: 'owner-acl-v1' | 'owner-acl-v2';
   uploadedByUserId: string;
   sharedWithUserIds: string[];
   shareVersions?: Record<string, number>;
@@ -31,7 +32,7 @@ export interface ManagedFile {
   originalFilename: string;
   title: string;
   description: string;
-  visibility: 'private';
+  visibility: ManagedVisibility;
   allowedRoles: [
   ];
   category: 'managed';
@@ -101,14 +102,16 @@ export class ManagedStorage implements OnModuleDestroy {
   private valid(doc: any): asserts doc is ManagedFile {
     try {
       validateManagedCharge(doc);
+      managedVisibility(doc);
     }
     catch {
       throw this.unavailable();
     }
-    if (!doc || doc.type !== 'file' || doc.schemaVersion !== 2 || doc.storageScope !== 'portal-managed' || doc.accessModel !== 'owner-acl-v1' || !idPattern.test(doc._id) || !uuid.test(doc.storedFilename)
+    if (!doc || doc.type !== 'file' || doc.schemaVersion !== 2 || doc.storageScope !== 'portal-managed' || !['owner-acl-v1','owner-acl-v2'].includes(doc.accessModel) || (doc.accessModel === 'owner-acl-v1' && doc.visibility !== 'private' && doc.visibility !== undefined) || !idPattern.test(doc._id) || !uuid.test(doc.storedFilename)
       || doc.storageId !== process.env.PORTAL_UPLOADS_STORAGE_ID || !/^\d{1,16}$/.test(doc.upload?.reservedBytes) || !/^\d{1,16}$/.test(doc.upload?.declaredBytes)
       || !Number.isSafeInteger(doc.sizeBytes) || doc.sizeBytes < 0 || BigInt(doc.upload.declaredBytes) !== BigInt(doc.sizeBytes) || BigInt(doc.upload.reservedBytes) !== BigInt(doc.sizeBytes)
       || typeof doc.uploadedByUserId !== 'string' || !Array.isArray(doc.sharedWithUserIds) || doc.sharedWithUserIds.some((id: any) => typeof id !== 'string') || new Set(doc.sharedWithUserIds).size !== doc.sharedWithUserIds.length
+      || (doc.accessModel === 'owner-acl-v2' && (!['all-members','selected-members','private'].includes(doc.visibility) || (doc.visibility !== 'selected-members' && doc.sharedWithUserIds.length !== 0)))
       || !Array.isArray(doc.upload.auditOutbox) || doc.upload.auditOutbox.length > 100)
       throw this.unavailable();
     if (doc.upload.state === 'committed' && !/^[a-f0-9]{64}$/.test(doc.sha256))
@@ -345,11 +348,16 @@ export class ManagedStorage implements OnModuleDestroy {
           throw new BadRequestException('Invalid exact byte size');
         if (BigInt(dto.sizeBytes) > BigInt(policy.maxFileBytes))
           throw new PayloadTooLargeException('File exceeds the configured maximum upload size');
-        const id = 'upload-' + createHash('sha256').update(user._id + '\0' + dto.idempotencyKey).digest('hex'), fingerprint = createHash('sha256').update(JSON.stringify([dto.originalFilename, dto.title, dto.description, dto.sizeBytes])).digest('hex');
+        const fields = [dto.originalFilename, dto.title, dto.description, dto.sizeBytes];
+        const visibility = dto.visibility ?? 'all-members';
+        const id = 'upload-' + createHash('sha256').update(user._id + '\0' + dto.idempotencyKey).digest('hex');
+        const fingerprint = createHash('sha256').update(JSON.stringify([...fields, visibility])).digest('hex');
         const existing = await this.document('portal_files', id);
         if (existing) {
           this.valid(existing);
-          if (existing.upload.fingerprint !== fingerprint)
+          const legacyFingerprint = createHash('sha256').update(JSON.stringify(fields)).digest('hex');
+          const legacyRetry = existing.upload.fingerprint === legacyFingerprint && (dto.visibility === undefined || dto.visibility === 'private');
+          if (existing.upload.fingerprint !== fingerprint && !legacyRetry)
             throw new ConflictException('Retry key already belongs to a different upload');
           return { id, state: existing.upload.state };
         }
@@ -360,7 +368,7 @@ export class ManagedStorage implements OnModuleDestroy {
           throw new ConflictException('Too many outstanding upload reservations');
         const now = new Date().toISOString();
         const file: ManagedFile = {
-          _id: id, type: 'file', schemaVersion: 2, storageScope: 'portal-managed', storageId: process.env.PORTAL_UPLOADS_STORAGE_ID!, accessModel: 'owner-acl-v1', uploadedByUserId: user._id, sharedWithUserIds: [], storedFilename: randomUUID(), originalFilename: dto.originalFilename, title: dto.title, description: dto.description, visibility: 'private', allowedRoles: [], category: 'managed', mimeType: 'application/octet-stream', sizeBytes: Number(dto.sizeBytes), sha256: '', scanResult: 'not-scanned', createdAt: now, updatedAt: now,
+          _id: id, type: 'file', schemaVersion: 2, storageScope: 'portal-managed', storageId: process.env.PORTAL_UPLOADS_STORAGE_ID!, accessModel: 'owner-acl-v2', uploadedByUserId: user._id, sharedWithUserIds: [], shareOwnerVersion: user.sessionVersion ?? 0, storedFilename: randomUUID(), originalFilename: dto.originalFilename, title: dto.title, description: dto.description, visibility, allowedRoles: [], category: 'managed', mimeType: 'application/octet-stream', sizeBytes: Number(dto.sizeBytes), sha256: '', scanResult: 'not-scanned', createdAt: now, updatedAt: now,
           upload: { state: 'reserved', declaredBytes: dto.sizeBytes, reservedBytes: dto.sizeBytes, fingerprint, sessionVersion: user.sessionVersion ?? 0, sessionDigest: createHash('sha256').update(req.sessionID).digest('hex'), expiresAt: new Date(Date.now() + 600000).toISOString(), auditOutbox: [] }
         };
         await this.save('portal_files', file);
@@ -398,7 +406,9 @@ export class ManagedStorage implements OnModuleDestroy {
     if (file.uploadedByUserId === user.id)
       return true;
     const owner = await this.users.findById(file.uploadedByUserId);
-    return isAccessibleAccount(owner) && file.shareOwnerVersion === (owner.sessionVersion ?? 0) && file.sharedWithUserIds.includes(user.id) && file.shareVersions?.[user.id] === (actor.sessionVersion ?? 0);
+    if (!isAccessibleAccount(owner) || file.shareOwnerVersion !== (owner.sessionVersion ?? 0)) return false;
+    const visibility = managedVisibility(file);
+    return visibility === 'all-members' || (visibility === 'selected-members' && file.sharedWithUserIds.includes(user.id) && file.shareVersions?.[user.id] === (actor.sessionVersion ?? 0));
   }
   async auditAdministratorRead(file: any, user: SessionUser, context: {
     ip?: string;
@@ -407,7 +417,7 @@ export class ManagedStorage implements OnModuleDestroy {
     if (user.role !== 'admin' || file.uploadedByUserId === user.id)
       return;
     try {
-      await this.database.logAudit('file.administrator_access', { fileId: file._id, ownerId: file.uploadedByUserId, authorization: 'owner-granted-recipient', userAgent: context.userAgent?.slice(0, 256) }, user.id, user.username, context.ip);
+      await this.database.logAudit('file.administrator_access', { fileId: file._id, ownerId: file.uploadedByUserId, authorization: managedVisibility(file) === 'all-members' ? 'all-members' : 'owner-granted-recipient', userAgent: context.userAgent?.slice(0, 256) }, user.id, user.username, context.ip);
     }
     catch {
       throw this.unavailable();
@@ -421,9 +431,9 @@ export class ManagedStorage implements OnModuleDestroy {
     if (file.upload.state !== 'committed')
       throw new NotFoundException('File not found');
     const recipients = (await this.users.listUsers()).filter(u => isAccessibleAccount(u) && u._id !== actorId).map(u => ({ id: u._id, username: u.username, role: u.role, selected: file.sharedWithUserIds.includes(u._id!) && file.shareOwnerVersion === (actor.sessionVersion ?? 0) && file.shareVersions?.[u._id!] === (u.sessionVersion ?? 0) }));
-    return { file: { _id: file._id, title: file.title }, recipients };
+    return { file: { _id: file._id, title: file.title, visibility: managedVisibility(file) }, recipients };
   }
-  async share(id: string, recipientIds: string[], actorId: string, req: any) {
+  async share(id: string, recipientIds: string[], actorId: string, req: any, visibility?: ManagedVisibility) {
     return this.users.coordinateStorage(async () => {
       const actor = await this.account(actorId);
       let doc = await this.document('portal_files', id);
@@ -432,6 +442,8 @@ export class ManagedStorage implements OnModuleDestroy {
       this.valid(doc);
       if (doc.upload.state !== 'committed')
         throw new NotFoundException('File not found');
+      const mode = visibility ?? (recipientIds.length ? 'selected-members' : 'private');
+      if (mode !== 'selected-members') recipientIds = [];
       const versions: Record<string, number> = {};
       for (const id of recipientIds) {
         const user = await this.users.findById(id);
@@ -440,14 +452,17 @@ export class ManagedStorage implements OnModuleDestroy {
         Object.defineProperty(versions, id, { value: user.sessionVersion ?? 0, enumerable: true });
       }
       doc = await this.deliver(doc);
-      if (isDeepStrictEqual(doc.sharedWithUserIds, recipientIds) && isDeepStrictEqual(doc.shareVersions ?? {}, versions) && doc.shareOwnerVersion === (actor.sessionVersion ?? 0))
+      const previousVisibility = managedVisibility(doc);
+      if (previousVisibility === mode && isDeepStrictEqual(doc.sharedWithUserIds, recipientIds) && isDeepStrictEqual(doc.shareVersions ?? {}, versions) && doc.shareOwnerVersion === (actor.sessionVersion ?? 0))
         return;
       const previous = [...doc.sharedWithUserIds];
       doc.sharedWithUserIds = [...recipientIds];
+      doc.accessModel = 'owner-acl-v2';
+      doc.visibility = mode;
       doc.shareVersions = versions;
       doc.shareOwnerVersion = actor.sessionVersion ?? 0;
       doc.updatedAt = new Date().toISOString();
-      this.event(doc, recipientIds.length ? 'file.shared' : 'file.sharing_revoked', actor, req, { previous, next: recipientIds });
+      this.event(doc, visibility && previousVisibility !== mode ? 'file.visibility_changed' : (recipientIds.length ? 'file.shared' : 'file.sharing_revoked'), actor, req, { previous, next: recipientIds, previousVisibility, visibility: mode });
       const saved = await this.save('portal_files', doc);
       try {
         await this.deliver(saved);

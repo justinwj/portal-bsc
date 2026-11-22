@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, Post, Put, Req, Res, UseGuards } from '@nestjs/common';
 import { Request, Response } from 'express';
-import { AuthGuard } from '../common/guards/auth.guard';
+import { AuthGuard, BrowserPage } from '../common/guards/auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { ManagedStorage } from './managed-storage.service';
 import { SharingDto, UploadIntentDto, UploadPolicyDto } from './upload.dto';
@@ -8,6 +8,7 @@ import { SharingDto, UploadIntentDto, UploadPolicyDto } from './upload.dto';
 @UseGuards(AuthGuard)
 export class UploadsController {
   constructor(private readonly storage: ManagedStorage) { }
+  @BrowserPage()
   @Get('uploads')
   page(
     @Req()
@@ -40,6 +41,7 @@ export class UploadsController {
     req: Request & {
       session?: any;
     }) { return this.storage.status(id, req.session.user.id); }
+  @BrowserPage()
   @Get('files/:id/sharing')
   async sharing(
     @Param('id')
@@ -61,7 +63,8 @@ export class UploadsController {
       session?: any;
     },
     @Res()
-    res: Response) { await this.storage.share(id, dto.recipientIds, req.session.user.id, req); return res.redirect(303, `/files/${encodeURIComponent(id)}/sharing?saved=1`); }
+    res: Response) { await this.storage.share(id, dto.recipientIds, req.session.user.id, req, dto.visibility); return res.redirect(303, `/files/${encodeURIComponent(id)}/sharing?saved=1`); }
+  @BrowserPage()
   @Get('admin/settings/uploads')
   @UseGuards(AdminGuard)
   async settings(

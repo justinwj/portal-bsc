@@ -1,7 +1,7 @@
 import { BadRequestException, Body, Controller, Get, HttpException, Param, Post, Req, Res, UseGuards } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { AccountStatusDto, RegistrationDto } from '../common/dto/common.dto';
-import { AuthGuard } from '../common/guards/auth.guard';
+import { AuthGuard, BrowserPage } from '../common/guards/auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { UsersService } from './users.service';
 
@@ -29,6 +29,7 @@ export class LifecycleController {
     }
   }
 
+  @BrowserPage()
   @Get('account')
   @UseGuards(AuthGuard)
   async account(@Req() req: SessionRequest, @Res() res: Response) {
@@ -66,6 +67,7 @@ export class LifecycleController {
     } catch (error) { return this.failure(error, res, '/admin/users'); }
   }
 
+  @BrowserPage()
   @Get('admin/users/:id/history')
   @UseGuards(AuthGuard, AdminGuard)
   async history(@Req() req: SessionRequest, @Param('id') id: string, @Res() res: Response) {

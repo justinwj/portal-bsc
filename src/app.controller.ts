@@ -1,6 +1,6 @@
 import { Controller, Get, Param, Req, Res, UseGuards, NotFoundException } from '@nestjs/common';
 import { Request, Response } from 'express';
-import { AuthGuard } from './common/guards/auth.guard';
+import { AuthGuard, BrowserPage } from './common/guards/auth.guard';
 import { FilesService } from './files/files.service';
 
 @Controller()
@@ -8,6 +8,7 @@ import { FilesService } from './files/files.service';
 export class AppController {
   constructor(private readonly filesService: FilesService) {}
 
+  @BrowserPage()
   @Get('/')
   async dashboard(@Req() req: Request & { session?: any }, @Res() res: Response) {
     const files = await this.filesService.listFilesForUser(req.session.user,{ip:req.ip,userAgent:req.get('user-agent')});
@@ -18,12 +19,14 @@ export class AppController {
     });
   }
 
+  @BrowserPage()
   @Get('/files')
   async filesPage(@Req() req: Request & { session?: any }, @Res() res: Response) {
     const files = await this.filesService.listFilesForUser(req.session.user,{ip:req.ip,userAgent:req.get('user-agent')});
     return res.render('files', { title: 'Files', user: req.session.user, files });
   }
 
+  @BrowserPage()
   @Get('/files/:id')
   async fileDetail(@Req() req: Request & { session?: any }, @Param('id') id: string, @Res() res: Response) {
     const file = await this.filesService.getById(id);

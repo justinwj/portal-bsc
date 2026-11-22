@@ -222,7 +222,7 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
     const policy = await http('/admin/settings/uploads', { method: 'POST', cookie: a.cookie, headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ maxUploadGb: '1', confirm: 'yes', _csrf: a.csrf }).toString() });
     assert.equal(policy.status, 303);
-    const intent = await json(a, '/uploads/intents', { originalFilename: 'deployment.txt', title: 'Private fixture', description: '', sizeBytes: String(bytes.length), idempotencyKey: randomUUID() });
+    const intent = await json(a, '/uploads/intents', { visibility:'private', originalFilename: 'deployment.txt', title: 'Private fixture', description: '', sizeBytes: String(bytes.length), idempotencyKey: randomUUID() });
     assert.equal(intent.status, 201, intent.body); fileId = JSON.parse(intent.body).id;
     const upload = await http(`/uploads/${fileId}/content`, { method: 'PUT', cookie: a.cookie, headers: { 'x-csrf-token': a.csrf, 'content-type': 'application/octet-stream', 'content-length': String(bytes.length) }, body: bytes });
     assert.equal(upload.status, 200, upload.body);
@@ -391,7 +391,7 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
   });
   it('streams a private upload through the proxy contract and retains exact-byte quota enforcement',async()=>{
     const content='proxy upload fixture',size=Buffer.byteLength(content);
-    const intent=await serveJson(serveOwner,'/uploads/intents',{originalFilename:'proxy.txt',title:'Proxy fixture',description:'synthetic',sizeBytes:String(size),idempotencyKey:randomUUID()});
+    const intent=await serveJson(serveOwner,'/uploads/intents',{visibility:'private',originalFilename:'proxy.txt',title:'Proxy fixture',description:'synthetic',sizeBytes:String(size),idempotencyKey:randomUUID()});
     assert.equal(intent.status,201,intent.body);const id=JSON.parse(intent.body).id;
     const upload=await served(`/uploads/${id}/content`,{method:'PUT',cookie:serveOwner.cookie,
       headers:{'x-csrf-token':serveOwner.csrf,'content-type':'application/octet-stream','content-length':String(size)},body:content});
@@ -563,5 +563,32 @@ describe('DS920 additive deployment with existing bind-backed infrastructure', {
       assert.deepEqual(info.HostConfig.PortBindings,{},`${name} rollback publication`);
     }
     console.log('All four services unpublished; internal dependency access and Unix-placeholder rollback succeeded');
+  });
+  it('7I runs browser login, persisted policy and all-member/selected/private downloads through the existing unpublished Unix deployment',async()=>{
+    const infrastructureIds=await ids();
+    await compose(['up','-d','--no-deps','app']);
+    await writeFile(activeProxyConfig,require('../../scripts/render-unix-proxy.cjs').renderUnixProxy({PORTAL_PUBLIC_ORIGIN:`https://${serveHost}`,PORTAL_PROXY_RESPONSE_MODE:'app'}));
+    await compose(['exec','-T','nginx','nginx','-s','reload']);
+    const ready=()=>eventually(async()=>{const r=await served('/healthz');assert.equal(r.status,200);assert.equal(JSON.parse(r.body).status,'ok');},'7I JSON app readiness');await ready();
+    const anonymous=await served('/',{headers:{Accept:'text/html'}});assert.equal(anonymous.status,302);assert.equal(anonymous.headers.location,'/login');
+    assert.equal((await served('/',{headers:{Accept:'application/json'}})).status,401);
+    const owner=await serveLogin(),member=await serveLogin('existing-member');
+    assert.match((await served('/admin/settings/uploads',{cookie:owner.cookie})).body,/name="confirm"[^>]*\bchecked\b/);
+    const data='All-member Unix fixture',intent=await serveJson(owner,'/uploads/intents',{originalFilename:'collaboration.txt',title:'Member collaboration',description:'Synthetic CI data',sizeBytes:String(Buffer.byteLength(data)),idempotencyKey:randomUUID()});
+    assert.equal(intent.status,201,intent.body);const id=JSON.parse(intent.body).id;
+    assert.equal((await served(`/uploads/${id}/content`,{method:'PUT',cookie:owner.cookie,headers:{'x-csrf-token':owner.csrf,'content-type':'application/octet-stream','content-length':String(Buffer.byteLength(data))},body:data})).status,200);
+    const download=await served(`/download/${id}`,{cookie:member.cookie});assert.equal(download.status,200);assert.equal(download.body,data);assert.match(download.headers['content-disposition'],/attachment/);
+    const list=await served('/files',{cookie:member.cookie});assert.match(list.body,/All members/);
+    assert.equal((await served(`/download/${fileId}`,{cookie:member.cookie})).status,404,'Prior private fixture remains private');
+    await compose(['up','-d','--no-deps','--force-recreate','app']);await ready();
+    const fresh=await serveLogin(),reader=await serveLogin('existing-member');assert.equal((await served(`/download/${id}`,{cookie:reader.cookie})).body,data);
+    assert.equal((await serveJson(fresh,`/files/${id}/sharing`,{visibility:'private'})).status,303);
+    assert.equal((await served(`/download/${id}`,{cookie:reader.cookie})).status,404);
+    assert.equal((await serveJson(fresh,`/files/${id}/sharing`,{visibility:'selected-members',recipientIds:['existing-member']})).status,303);
+    assert.equal((await served(`/download/${id}`,{cookie:reader.cookie})).body,data);
+    assert.deepEqual(await ids(),infrastructureIds);
+    for(const name of ['nginx','couchdb','redis','app']){
+      const id=(await compose(['ps','-q',name])).stdout.trim();assert.deepEqual(JSON.parse((await exec('docker',['inspect',id])).stdout)[0].HostConfig.PortBindings,{});
+    }
   });
 });

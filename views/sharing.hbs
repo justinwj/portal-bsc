@@ -1,9 +1,10 @@
 <h1>Share {{file.title}}</h1>
-{{#if saved}}<p role="status">Selected access saved. Unchanged submissions do not create another sharing event.</p>{{/if}}
-<p>Private is the default. Select only approved users who should download this file. Administrators also need your explicit grant; their access is audited. Recipients cannot share onward.</p>
-<p>To revoke all sharing, clear every checkbox and save. Changes apply on subsequent requests. Account status changes invalidate existing grants; renew them after reactivation.</p>
+{{#if saved}}<p role="status">Visibility and selected access saved. Unchanged submissions do not create another sharing event.</p>{{/if}}
+<p>All members allows every active, approved Portal account, including newly approved accounts. Selected members allows you and selected approved recipients. Private is owner-only. Every mode requires login; administrator access is audited and never bypasses your policy. Recipients cannot share onward.</p>
+<p>Saving All members or Private clears the selected-recipient grants. Changes apply on subsequent requests. Account status changes invalidate selected grants; renew them after reactivation.</p>
 <form method="POST" action="/files/{{file._id}}/sharing">
   <input type="hidden" name="_csrf" value="{{csrfToken}}" />
+  <label>Visibility<select name="visibility"><option value="all-members" {{#if (eq file.visibility "all-members")}}selected{{/if}}>All members</option><option value="selected-members" {{#if (eq file.visibility "selected-members")}}selected{{/if}}>Selected members</option><option value="private" {{#if (eq file.visibility "private")}}selected{{/if}}>Private</option></select></label>
   <fieldset><legend>Approved recipients</legend>
     {{#each recipients}}<label><input type="checkbox" name="recipientIds" value="{{id}}" {{#if selected}}checked{{/if}} /> {{username}} ({{role}})</label>{{/each}}
   </fieldset>

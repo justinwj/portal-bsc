@@ -87,6 +87,8 @@ Remove all three bootstrap inputs from the runtime environment and recreate the 
 For the current DS920+ transport proposal, use [restricted Unix-socket deployment preparation](docs/unix-socket-deployment.md). The earlier localhost-published HTTP backend has a confirmed bypass and must not be deployed for production authentication. NAS compatibility and direct LAN/tailnet denial remain manual acceptance gates.
 
 ## Known limitations
-- Legacy NAS files use role-based authorization; managed files use owner/selected-recipient grants. Department permissions and anonymous links are not implemented.
+- Legacy NAS files use role-based authorization; new managed uploads default to All members, with owner-controlled Selected members or Private access. Department permissions and anonymous links are not implemented.
 - The app does not implement password reset. Public registration requires administrator approval.
 - One application writer is supported. Actual DSM ACLs, antivirus scheduling, backup restore and interactive Rider/Office acceptance still require operator verification.
+
+For Session 7I browser authentication, persisted upload-policy confirmation, visibility compatibility and the application-only upgrade/rollback boundary, see [the release candidate guide](docs/session-7i-application-upgrade.md). No automatic NAS deployment is authorized.

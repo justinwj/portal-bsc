@@ -5,11 +5,19 @@ const vm = require('node:vm');
 function browser(fetch) {
   let submit, sequence = 0;
   const status = { textContent: '' }, button = { disabled: false }, navigations = [];
-  const form = { elements: { file: { files: [{ name: 'a.txt', size: 3, lastModified: 1 }] }, title: { value: 'Title' }, description: { value: '' }, _csrf: { value: 'csrf' } }, querySelector: () => button, addEventListener: (_event, handler) => { submit = handler; } };
+  const form = { elements: { file: { files: [{ name: 'a.txt', size: 3, lastModified: 1 }] }, title: { value: 'Title' }, description: { value: '' }, visibility: {value:'all-members'}, _csrf: { value: 'csrf' } }, querySelector: () => button, addEventListener: (_event, handler) => { submit = handler; } };
   vm.runInNewContext(readFileSync('public/js/uploads.js', 'utf8'), { document: { getElementById: id => id === 'upload-form' ? form : status }, crypto: { randomUUID: () => `key-${++sequence}` }, fetch, location: { assign: url => navigations.push(url) }, Error });
   return { submit: () => submit({ preventDefault() {} }), form, status, navigations };
 }
 const response = body => ({ ok: true, status: 200, json: async () => body });
+for(const visibility of ['all-members','selected-members','private'])it(`browser submits ${visibility} as durable upload metadata`,async()=>{
+  let submitted;
+  const client=browser(async(url,options)=>{
+    if(url==='/uploads/intents'){submitted=JSON.parse(options.body);return response({id:'upload-known',state:'reserved'});}
+    return response({id:'upload-known',state:'committed'});
+  });
+  client.form.elements.visibility.value=visibility;await client.submit();assert.equal(submitted.visibility,visibility);
+});
 it('browser explains a plain-text 429 without showing a JSON parser error or retrying automatically', async () => {
   let requests=0;const client=browser(async()=>{requests++;return{ok:false,status:429,json:async()=>{throw new SyntaxError('Unexpected token in private server text');}};});
   await client.submit();assert.match(client.status.textContent,/too many requests.*wait/i);assert.doesNotMatch(client.status.textContent,/Unexpected token|private server/);assert.equal(requests,1);assert.equal(client.navigations.length,0);

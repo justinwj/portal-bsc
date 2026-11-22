@@ -21,7 +21,7 @@ form?.addEventListener('submit', async (event) => {
     const file = form.elements.file.files[0];
     if (!file) throw new Error('Choose a file.');
     const headers = { 'x-csrf-token': form.elements._csrf.value };
-    const metadata = { originalFilename: file.name, title: form.elements.title.value, description: form.elements.description.value, sizeBytes: String(file.size) };
+    const metadata = { originalFilename: file.name, title: form.elements.title.value, description: form.elements.description.value, sizeBytes: String(file.size), visibility: form.elements.visibility.value };
     const fingerprint = JSON.stringify([metadata, file.lastModified]);
     if (!attempt || attempt.fingerprint !== fingerprint) attempt = { fingerprint, key: crypto.randomUUID() };
     let reservation;

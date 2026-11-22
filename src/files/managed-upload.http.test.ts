@@ -76,12 +76,164 @@ describe('managed upload admission and streaming HTTP',{concurrency:false},()=>{
   async function actor(name='owner'){const client=browser(),csrf=token((await client.request('/login')).body);assert.equal((await client.request('/login',{username:name,password},'POST',csrf)).status,302);return{client,csrf:token((await client.request('/')).body)};}
   async function confirm(){const a=await actor('admin');const r=await a.client.request('/admin/settings/uploads',{maxUploadGb:'1',confirm:'yes'},'POST',a.csrf);assert.equal(r.status,303,r.body);}
   async function intent(a:Awaited<ReturnType<typeof actor>>,bytes=3,name='sample.txt',key=randomUUID()){
-    return a.client.request('/uploads/intents',{originalFilename:name,title:'Private title',description:'Private description',sizeBytes:String(bytes),idempotencyKey:key},'POST',a.csrf);
+    return a.client.request('/uploads/intents',{visibility:'private',originalFilename:name,title:'Private title',description:'Private description',sizeBytes:String(bytes),idempotencyKey:key},'POST',a.csrf);
   }
   async function upload(a:Awaited<ReturnType<typeof actor>>,data:Buffer=Buffer.from('abc'),name='sample.txt'){
     const r=await intent(a,data.length,name);assert.equal(r.status,201,r.body);const id=JSON.parse(r.body).id;
     const done=await a.client.request(`/uploads/${id}/content`,data,'PUT',a.csrf);assert.equal(done.status,200,done.body);return id;
   }
+  const confirmationChecked=(html:string)=>/name="confirm"[^>]*\bchecked\b/.test(html);
+  async function collaborationUpload(a:Awaited<ReturnType<typeof actor>>,visibility?:string,key=randomUUID()){
+    const r=await a.client.request('/uploads/intents',{originalFilename:'collaboration.txt',title:'Collaboration fixture',description:'Managed test',sizeBytes:'3',idempotencyKey:key,...(visibility===undefined?{}:{visibility})},'POST',a.csrf);
+    assert.equal(r.status,201,r.body);const id=JSON.parse(r.body).id;
+    assert.equal((await a.client.request(`/uploads/${id}/content`,Buffer.from('abc'),'PUT',a.csrf)).status,200);return id;
+  }
+  async function navigation(path:string,cookie='',accept='text/html'){
+    return fetch(url+path,{headers:{cookie,Accept:accept},redirect:'manual'});
+  }
+  it('7I policy: persisted confirmation stays checked after submit, refresh and a new administrator session',async()=>{
+    await confirm();const snapshot=structuredClone(store.settings);
+    for(const a of [await actor('admin'),await actor('admin')]){
+      const page=await a.client.request('/admin/settings/uploads');assert.equal(page.status,200);
+      assert.ok(confirmationChecked(page.body));assert.match(page.body,/Upload policy: Confirmed/);
+    }
+    assert.equal(store.docs.get('managed-upload-policy')?.confirmed,true);assert.deepEqual(store.settings,snapshot);
+  });
+  it('7I policy: an unconfirmed policy is visibly unchecked',async()=>{
+    const a=await actor('admin'),page=await a.client.request('/admin/settings/uploads');
+    assert.equal(confirmationChecked(page.body),false);assert.match(page.body,/Upload policy: Not confirmed/);
+  });
+  it('7I policy: invalid or omitted confirmation never revokes saved policy or quotas',async()=>{
+    await confirm();const a=await actor('admin'),snapshot=structuredClone(store.settings),policy=structuredClone(store.docs.get('managed-upload-policy'));
+    for(const dto of [{maxUploadGb:'2'},{maxUploadGb:'bad',confirm:'yes'}])assert.equal((await a.client.request('/admin/settings/uploads',dto,'POST',a.csrf)).status,400);
+    assert.deepEqual(store.settings,snapshot);assert.deepEqual(store.docs.get('managed-upload-policy'),policy);
+    assert.ok(confirmationChecked((await a.client.request('/admin/settings/uploads')).body));
+  });
+  it('7I policy: maximum edits require confirmation and preserve existing quota values',async()=>{
+    await confirm();const a=await actor('admin'),snapshot=structuredClone(store.settings);
+    assert.equal((await a.client.request('/admin/settings/uploads',{maxUploadGb:'0.5',confirm:'yes'},'POST',a.csrf)).status,303);
+    const page=await a.client.request('/admin/settings/uploads');assert.match(page.body,/value="0.5"/);assert.ok(confirmationChecked(page.body));assert.deepEqual(store.settings,snapshot);
+  });
+  it('7I policy: audit failure reports failure while rendering the actual persisted confirmation',async()=>{
+    const a=await actor('admin');store.failAudit=true;
+    const result=await a.client.request('/admin/settings/uploads',{maxUploadGb:'1',confirm:'yes'},'POST',a.csrf);assert.equal(result.status,503);
+    assert.match(result.body,/changed.*audit/i);store.failAudit=false;
+    assert.ok(confirmationChecked((await a.client.request('/admin/settings/uploads')).body));
+  });
+  it('7I browser: page navigation redirects to a fixed login route without exposing content or looping',async()=>{
+    for(const path of ['/','/files','/uploads','/account','/admin/users','/admin/settings','/admin/settings/uploads','/files/missing/sharing']){
+      const result=await navigation(path+'?returnTo=https://attacker.example');assert.equal(result.status,302,path);assert.equal(result.headers.get('location'),'/login');assert.doesNotMatch(await result.text(),/Collaboration fixture/);
+    }
+    assert.equal((await navigation('/login')).status,200);
+    const a=await actor();assert.equal((await navigation('/',a.client.cookie)).status,200);
+  });
+  it('7I browser: APIs and non-HTML requests retain JSON 401',async()=>{
+    for(const [path,accept] of [['/','application/json'],['/','*/*'],['/uploads/missing','text/html'],['/download/missing','text/html'],['/','application/json, text/html;q=0.1']]){
+      const result=await navigation(path,'',accept);assert.equal(result.status,401);assert.match(result.headers.get('content-type')!,/application\/json/);assert.equal(result.headers.get('location'),null);
+    }
+  });
+  it('7I browser: mutations never redirect or bypass CSRF even when requesting HTML',async()=>{
+    const client=browser(),csrf=token((await client.request('/login')).body);
+    for(const value of [undefined,csrf]){
+      const response=await fetch(url+'/uploads/intents',{method:'POST',headers:{Accept:'text/html',cookie:client.cookie,'content-type':'application/json',...(value?{'x-csrf-token':value}:{})},body:'{}',redirect:'manual'});
+      assert.equal(response.status,value?401:403);assert.equal(response.headers.get('location'),null);
+    }
+    const member=await actor();assert.equal((await navigation('/admin/users',member.client.cookie)).status,403);
+  });
+  for(const state of ['disabled','closed','pending','rejected','revoked'])it(`7I browser: ${state} sessions stay blocked`,async()=>{
+    const a=await actor(),user=store.users.get('owner');
+    if(state==='disabled')user.isActive=false;else if(state==='closed')user.closedAt=new Date().toISOString();else if(state==='revoked')user.sessionVersion++;else user.registration={status:state};
+    const response=await navigation('/',a.client.cookie);assert.equal(response.status,302);assert.equal(response.headers.get('location'),'/login');
+    assert.equal((await a.client.request('/files')).status,401);
+  });
+  it('7I visibility: default new upload is all-member and includes newly approved accounts without ID fanout',async()=>{
+    await confirm();const owner=await actor(),member=await actor('member'),admin=await actor('admin'),id=await collaborationUpload(owner);
+    const file=store.files.get(id);assert.equal(file.visibility,'all-members');assert.deepEqual(file.sharedWithUserIds,[]);
+    for(const a of [member,admin]){assert.match((await a.client.request('/files')).body,/All members/);assert.equal((await a.client.request(`/files/${id}`)).status,200);assert.equal((await a.client.request(`/download/${id}`)).body,'abc');}
+    store.users.set('newcomer',{...structuredClone(store.users.get('member')),_id:'newcomer',username:'newcomer',registration:{status:'approved'}});
+    assert.equal((await (await actor('newcomer')).client.request(`/download/${id}`)).status,200);assert.deepEqual(store.files.get(id).sharedWithUserIds,[]);
+    assert.equal((await browser().request('/files')).status,401);assert.equal((await browser().request(`/files/${id}`)).status,401);assert.equal((await browser().request(`/download/${id}`)).status,401);
+  });
+  it('7I compatibility: new policies are versioned and old-format records cannot silently opt into all-member access',async()=>{
+    await confirm();const owner=await actor(),member=await actor('member'),id=await collaborationUpload(owner);
+    assert.equal(store.files.get(id).accessModel,'owner-acl-v2');
+    store.files.get(id).accessModel='owner-acl-v1';assert.equal((await member.client.request(`/download/${id}`)).status,503);
+  });
+  for(const visibility of ['private','all-members'])it(`7I compatibility: inconsistent v2 ${visibility} recipients fail closed`,async()=>{
+    await confirm();const owner=await actor(),member=await actor('member'),id=await collaborationUpload(owner);
+    Object.assign(store.files.get(id),{visibility,sharedWithUserIds:['member'],shareVersions:{member:0}});
+    assert.equal((await member.client.request(`/download/${id}`)).status,503);
+  });
+  it('7I compatibility: legacy retry fingerprints retain existing private records without revision changes',async()=>{
+    await confirm();const owner=await actor(),key=randomUUID(),response=await intent(owner,3,'sample.txt',key),id=JSON.parse(response.body).id;
+    assert.equal((await owner.client.request(`/uploads/${id}/content`,Buffer.from('abc'),'PUT',owner.csrf)).status,200);
+    const file=store.files.get(id);file.accessModel='owner-acl-v1';file.upload.fingerprint=createHash('sha256').update(JSON.stringify(['sample.txt','Private title','Private description','3'])).digest('hex');
+    const snapshot=structuredClone(file),retry=await owner.client.request('/uploads/intents',{originalFilename:'sample.txt',title:'Private title',description:'Private description',sizeBytes:'3',idempotencyKey:key},'POST',owner.csrf);
+    assert.equal(retry.status,201);assert.equal(JSON.parse(retry.body).id,id);assert.deepEqual(store.files.get(id),snapshot);
+  });
+  it('7I visibility: invalid modes, CSRF and non-owner requests leave persisted access unchanged',async()=>{
+    await confirm();const owner=await actor(),id=await collaborationUpload(owner),snapshot=structuredClone(store.files.get(id));
+    assert.equal((await owner.client.request(`/files/${id}/sharing`,{visibility:'public'},'POST',owner.csrf)).status,400);
+    assert.equal((await owner.client.request(`/files/${id}/sharing`,{visibility:'private'},'POST')).status,403);
+    assert.deepEqual(store.files.get(id),snapshot);
+  });
+  it('7I visibility: explicit null or malformed modes are rejected rather than becoming defaults',async()=>{
+    await confirm();const owner=await actor();
+    for(const visibility of [null,'',[],{},'public']){
+      const r=await owner.client.request('/uploads/intents',{originalFilename:'a.txt',title:'a',description:'',sizeBytes:'1',idempotencyKey:randomUUID(),visibility},'POST',owner.csrf);
+      assert.equal(r.status,400);assert.equal(store.files.size,0);
+    }
+  });
+  it('7I visibility: failed audit delivery retains an idempotent durable visibility event',async()=>{
+    await confirm();const owner=await actor(),id=await collaborationUpload(owner);store.failAuditWrite=true;
+    const response=await owner.client.request(`/files/${id}/sharing`,{visibility:'private'},'POST',owner.csrf);
+    assert.equal(response.status,503);assert.equal(store.files.get(id).visibility,'private');assert.equal(store.files.get(id).upload.auditOutbox.length,1);
+    store.failAuditWrite=false;assert.equal((await owner.client.request(`/files/${id}/sharing`,{visibility:'private'},'POST',owner.csrf)).status,303);
+    assert.equal([...store.docs.values()].filter((e:any)=>e.event==='file.visibility_changed'&&e.details.fileId===id).length,1);
+  });
+  for(const visibility of ['private','selected-members','all-members'])it(`7I visibility: initial ${visibility} is accepted and displayed`,async()=>{
+    await confirm();const owner=await actor(),member=await actor('member'),id=await collaborationUpload(owner,visibility);
+    assert.equal(store.files.get(id).visibility,visibility);assert.equal((await member.client.request(`/download/${id}`)).status,visibility==='all-members'?200:404);
+    const uploadPage=await owner.client.request('/uploads');assert.match(uploadPage.body,/value="all-members" selected/);assert.match(uploadPage.body,/Selected members/);
+  });
+  it('7I visibility: mode switches clear stale recipients, preserve owner control and audit each transition',async()=>{
+    await confirm();const owner=await actor(),member=await actor('member'),id=await collaborationUpload(owner);
+    const before=structuredClone(store.files.get(id)),set=(visibility:string,recipientIds:string[]=[])=>owner.client.request(`/files/${id}/sharing`,{visibility,recipientIds},'POST',owner.csrf);
+    assert.equal((await set('selected-members',['member'])).status,303);assert.equal((await member.client.request(`/download/${id}`)).status,200);
+    assert.equal((await set('private',['member'])).status,303);assert.deepEqual(store.files.get(id).sharedWithUserIds,[]);assert.equal((await member.client.request(`/download/${id}`)).status,404);
+    assert.equal((await set('all-members')).status,303);assert.equal((await member.client.request(`/download/${id}`)).status,200);
+    assert.equal((await set('selected-members')).status,303);assert.equal((await member.client.request(`/download/${id}`)).status,404);
+    assert.equal((await member.client.request(`/files/${id}/sharing`,{visibility:'all-members'},'POST',member.csrf)).status,404);
+    const after=store.files.get(id);for(const key of ['storedFilename','sha256','sizeBytes','uploadedByUserId','storageId'])assert.equal(after[key],before[key]);
+    const events=[...store.docs.values()].filter((d:any)=>d.event==='file.visibility_changed'&&d.details.fileId===id);assert.equal(events.length,4);
+  });
+  it('7I visibility: legacy private and selected records remain unchanged on reads',async()=>{
+    await confirm();const owner=await actor(),member=await actor('member');
+    for(const selected of [false,true]){
+      const id=await upload(owner),f=store.files.get(id);f.accessModel='owner-acl-v1';f.visibility='private';f.sharedWithUserIds=selected?['member']:[];f.shareVersions=selected?{member:0}:{};f.shareOwnerVersion=0;
+      const snapshot=structuredClone(f);assert.equal((await member.client.request(`/download/${id}`)).status,selected?200:404);assert.deepEqual(store.files.get(id),snapshot);
+    }
+  });
+  it('7I visibility: inactive recipients and owner suspension/session changes block all-member access',async()=>{
+    await confirm();const owner=await actor(),member=await actor('member'),id=await collaborationUpload(owner);
+    store.users.get('owner').isActive=false;assert.equal((await member.client.request(`/download/${id}`)).status,404);
+    store.users.get('owner').isActive=true;store.users.get('owner').sessionVersion++;
+    assert.equal((await member.client.request(`/download/${id}`)).status,404);
+    const renewed=await actor();assert.equal((await renewed.client.request(`/files/${id}/sharing`,{visibility:'all-members'},'POST',renewed.csrf)).status,303);
+    assert.equal((await member.client.request(`/download/${id}`)).status,200);
+    store.users.get('member').isActive=false;assert.equal((await member.client.request(`/download/${id}`)).status,401);
+  });
+  for(const state of ['disabled','closed','pending','rejected','revoked'])it(`7I visibility: ${state} accounts cannot list, inspect or download all-member files`,async()=>{
+    await confirm();const owner=await actor(),member=await actor('member'),id=await collaborationUpload(owner),user=store.users.get('member');
+    if(state==='disabled')user.isActive=false;else if(state==='closed')user.closedAt=new Date().toISOString();else if(state==='revoked')user.sessionVersion++;else user.registration={status:state};
+    for(const path of ['/files',`/files/${id}`,`/download/${id}`]){const r=await member.client.request(path);assert.equal(r.status,401);assert.doesNotMatch(r.body,/Collaboration fixture/);}
+  });
+  it('7I visibility: all-member administrator reads are audited and fail closed when audit persistence fails',async()=>{
+    await confirm();const owner=await actor(),admin=await actor('admin'),id=await collaborationUpload(owner);
+    assert.equal((await admin.client.request(`/download/${id}`)).status,200);
+    assert.ok(store.audits.some(e=>e.event==='file.administrator_access'&&e.details.authorization==='all-members'&&e.userId==='admin'));
+    store.failAudit=true;assert.equal((await admin.client.request(`/download/${id}`)).status,503);
+  });
   it('provides an authenticated upload page with CSRF and unscanned/macro warnings',async()=>{const a=await actor();const r=await a.client.request('/uploads');assert.equal(r.status,200);assert.equal(token(r.body),a.csrf);assert.match(r.body,/Office|macro/i);assert.match(r.body,/not.*scanned|unscanned/i);});
   it('explains active project content, download-only archives and Rhino lock limitations',async()=>{
     const a=await actor(),r=await a.client.request('/uploads');assert.match(r.body,/never runs uploaded/i);assert.match(r.body,/archives are not extracted/i);assert.match(r.body,/temporary Rhino lock/i);
@@ -245,8 +397,8 @@ describe('managed upload admission and streaming HTTP',{concurrency:false},()=>{
   it('revalidates storage identity for managed reads as well as writes',async()=>{
     await confirm();const owner=await actor(),id=await upload(owner);await writeFile(join(process.env.PORTAL_UPLOADS_DIR!,'.portal-storage.json'),JSON.stringify({schemaVersion:1,id:randomUUID()}));assert.equal((await owner.client.request(`/download/${id}`)).status,503);
   });
-  it('labels Private, Shared and Administrator access accurately in the browser',async()=>{
-    await confirm();const owner=await actor(),id=await upload(owner);assert.match((await owner.client.request('/files')).body,/>Private</);assert.equal((await share(owner,id,['admin','member'])).status,303);assert.match((await owner.client.request('/files')).body,/>Shared</);const admin=await actor('admin');assert.match((await admin.client.request(`/files/${id}`)).body,/Administrator/);
+  it('labels Private and Selected members consistently for every account in the browser',async()=>{
+    await confirm();const owner=await actor(),id=await upload(owner);assert.match((await owner.client.request('/files')).body,/>Private</);assert.equal((await share(owner,id,['admin','member'])).status,303);assert.match((await owner.client.request('/files')).body,/>Selected members</);const admin=await actor('admin');assert.match((await admin.client.request(`/files/${id}`)).body,/Selected members/);
   });
   it('shows confirmation after saving sharing and supports native unchecked-form revocation',async()=>{
     await confirm();const owner=await actor(),id=await upload(owner),saved=await share(owner,id,['member']);assert.equal(saved.status,303);const page=await owner.client.request(saved.headers.get('location')!);assert.match(page.body,/role="status"/);

@@ -1,5 +1,6 @@
-import { ArrayMaxSize, ArrayUnique, IsArray, IsIn, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
+import { ArrayMaxSize, ArrayUnique, IsArray, IsIn, IsOptional, IsString, IsUUID, MaxLength, MinLength, ValidateIf } from 'class-validator';
 import { Transform } from 'class-transformer';
+import { managedVisibilities, ManagedVisibility } from '../common/file-visibility';
 export class UploadIntentDto {
   @IsString()
   @MinLength(1)
@@ -17,6 +18,9 @@ export class UploadIntentDto {
   sizeBytes: string;
   @IsUUID('4')
   idempotencyKey: string;
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsIn(managedVisibilities)
+  visibility?: ManagedVisibility;
 }
 export class UploadPolicyDto {
   @IsString()
@@ -29,6 +33,9 @@ export class UploadPolicyDto {
   useRecommended?: string;
 }
 export class SharingDto {
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsIn(managedVisibilities)
+  visibility?: ManagedVisibility;
   @Transform(({ value }) => typeof value === 'string' ? (value ? [value] : []) : value)
   @IsArray()
   @ArrayMaxSize(50)

@@ -6,6 +6,7 @@ import { CouchDbService, FileRecord } from '../common/couchdb.service';
 import { SessionUser, UserRole } from '../common/roles';
 import { ManagedStorage } from './managed-storage.service';
 import { createHash } from 'node:crypto';
+import { managedVisibility, visibilityLabel } from '../common/file-visibility';
 
 @Injectable()
 export class FilesService {
@@ -14,7 +15,7 @@ export class FilesService {
 
   private isManaged(file:FileRecord){return file.schemaVersion!==undefined||file.accessModel!==undefined||file._id?.startsWith('upload-');}
   noteDownloadFailure(file:FileRecord){if(this.isManaged(file))this.managed?.invalidate();}
-  private presented(file:FileRecord,user:SessionUser){return this.isManaged(file)?{...file,accessCategory:file.uploadedByUserId===user.id?(file.sharedWithUserIds?.length?'Shared':'Private'):(user.role===UserRole.ADMIN?'Administrator':'Shared')}:file;}
+  private presented(file:FileRecord,_user:SessionUser){return this.isManaged(file)?{...file,accessCategory:visibilityLabel(managedVisibility(file))}:file;}
   private async canRead(file: FileRecord, user: SessionUser) {
     if(this.isManaged(file))return !!this.managed&&this.managed.canRead(file,user);
     return file.visibility === 'public' || (Array.isArray(file.allowedRoles) && file.allowedRoles.includes(user.role));

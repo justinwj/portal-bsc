@@ -2,7 +2,7 @@ import { BadRequestException, Body, Controller, Get, HttpException, Param, Post,
 import { Request, Response } from 'express';
 import { AccountStatusDto, CreateUserDto } from '../common/dto/common.dto';
 import { AdminGuard } from '../common/guards/admin.guard';
-import { AuthGuard } from '../common/guards/auth.guard';
+import { AuthGuard, BrowserPage } from '../common/guards/auth.guard';
 import { UsersService } from './users.service';
 
 @Controller('admin')
@@ -10,6 +10,7 @@ import { UsersService } from './users.service';
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
+  @BrowserPage()
   @Get('users')
   async usersPage(@Req() req: Request & { session?: any }, @Res() res: Response) {
     const notices = new Map([
@@ -37,6 +38,7 @@ export class UsersController {
     catch (error) { return this.statusError(error, req, res); }
   }
 
+  @BrowserPage()
   @Get('users/:id/disable')
   async confirmDisable(@Req() req: Request & { session?: any }, @Param('id') id: string, @Res() res: Response) {
     try {

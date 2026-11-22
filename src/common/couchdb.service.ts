@@ -35,7 +35,7 @@ export interface FileRecord {
   sizeBytes: number;
   sha256: string;
   category: string;
-  visibility: 'public' | 'private';
+  visibility: 'public' | 'private' | 'all-members' | 'selected-members';
   allowedRoles: UserRole[];
   uploadedByUserId: string;
   // Existing NAS records remain outside Portal-managed accounting unless

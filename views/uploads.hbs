@@ -1,5 +1,5 @@
 <h1>Upload a file</h1>
-<p>Uploads are private until you explicitly share with selected approved users. Microsoft Office files, including macro-enabled documents, are untrusted. Never enable macros unless you trust their source.</p>
+<p>New uploads default to All members: every active, approved Portal account can discover and download them after login. Choose Selected members or Private for restricted access. Microsoft Office files, including macro-enabled documents, remain untrusted.</p>
 <p>Files are not scanned by Portal before download. Scheduled Synology antivirus scanning may occur later.</p>
 <p>Portal never runs uploaded Python, bytecode, Blender scripts, macros or embedded code. SVG and XAML are downloads only; there are no previews or conversions.</p>
 <p>ZIP archives are not extracted or recompressed by Portal. Encrypted archives are rejected. Archive structure checks do not establish content safety; scheduled scanning may be less effective for archived content.</p>
@@ -10,7 +10,9 @@
   <label>File<input type="file" name="file" required /></label>
   <label>Title<input name="title" maxlength="200" required /></label>
   <label>Description<textarea name="description" maxlength="2000"></textarea></label>
-  <button type="submit">Upload privately</button>
+  <label>Visibility<select name="visibility"><option value="all-members" selected>All members</option><option value="selected-members">Selected members</option><option value="private">Private</option></select></label>
+  <p>Selected members starts with you only. After upload, use Manage sharing to choose approved recipients. Private is owner-only. Files are never accessible anonymously.</p>
+  <button type="submit">Upload file</button>
 </form>
 <p id="upload-status" role="status" aria-live="polite"></p>
 <noscript>Uploading requires JavaScript. Existing downloads remain available.</noscript>
